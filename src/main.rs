@@ -1,5 +1,5 @@
 #![allow(clippy::identity_op, clippy::too_many_arguments, dead_code)]
-use std::path::Path;
+use std::{path::Path, collections::HashMap};
 
 use psx_structs::{ModelPSX, TextureCollectionPSX};
 use stb_image::stb_image::bindgen::stbi_set_flip_vertically_on_load;
@@ -9,6 +9,11 @@ use crate::psx_structs::{MeshPSX, TextureCellPSX, VertexPSX};
 use exoquant::{convert_to_indexed, ditherer, optimizer, Color};
 mod helpers;
 mod psx_structs;
+
+struct MeshGridEntry {
+    triangles: Vec<VertexPSX>,
+    quads: Vec<VertexPSX>,
+}
 
 fn main() {
     unsafe {stbi_set_flip_vertically_on_load(1);}
@@ -24,12 +29,13 @@ fn main() {
 
     let mut model_psx = ModelPSX::new();
     let mut txc_psx = TextureCollectionPSX::new();
+    let mut triangles = Vec::<VertexPSX>::new();
+    let mut quads = Vec::<VertexPSX>::new();
 
+    // Loop over every mesh in the model. We want to combine them all.
     for model in &models {
         println!("parsing {}", model.name);
         let mut curr_index = 0;
-        let mut triangles = Vec::<VertexPSX>::new();
-        let mut quads = Vec::<VertexPSX>::new();
 
         let face_arities = match model.mesh.face_arities.is_empty() {
             false => model.mesh.face_arities.clone(),
@@ -81,11 +87,63 @@ fn main() {
             curr_index += arity;
         }
 
-        let n_triangles = triangles.len() / 3;
-        let n_quads = quads.len() / 4;
+    }
+
+    // Now that we have all the geometry, separated by triangle and quad, split it on a grid
+    let grid_size = (500.0, 500000.0, 500.0);
+    let mut mesh_grid: HashMap<i128, MeshGridEntry> = HashMap::new();
+
+    for triangle in triangles.chunks(3) {
+        // Find which gridcell this triangle belongs to
+        let avg_pos_x = (triangle[0].pos_x as f64 + triangle[1].pos_x as f64 + triangle[2].pos_x as f64) / 3.0;
+        let avg_pos_y = (triangle[0].pos_y as f64 + triangle[1].pos_y as f64 + triangle[2].pos_y as f64) / 3.0;
+        let avg_pos_z = (triangle[0].pos_z as f64 + triangle[1].pos_z as f64 + triangle[2].pos_z as f64) / 3.0;
+        let grid_x = (avg_pos_x / grid_size.0).round() as i32;
+        let grid_y = (avg_pos_y / grid_size.1).round() as i32;
+        let grid_z = (avg_pos_z / grid_size.2).round() as i32;
+        let map_entry = (grid_x as i128) | (grid_y as i128) << 32 | (grid_z as i128) << 64;
+
+        // Create entry in grid map if it didn't exist yet
+        if mesh_grid.get(&map_entry).is_none() {
+            mesh_grid.insert(map_entry, MeshGridEntry{triangles: Vec::new(), quads: Vec::new()});
+        }
+
+        // Add this triangle to that mesh
+        let mesh_psx = mesh_grid.get_mut(&map_entry).unwrap();
+        mesh_psx.triangles.push(triangle[0]);
+        mesh_psx.triangles.push(triangle[1]);
+        mesh_psx.triangles.push(triangle[2]);
+    }
+
+    for quad in quads.chunks(4) {
+        // Find which gridcell this triangle belongs to
+        let avg_pos_x = (quad[0].pos_x as f64 + quad[1].pos_x as f64 + quad[2].pos_x as f64 + quad[3].pos_x as f64) / 4.0;
+        let avg_pos_y = (quad[0].pos_y as f64 + quad[1].pos_y as f64 + quad[2].pos_y as f64 + quad[3].pos_y as f64) / 4.0;
+        let avg_pos_z = (quad[0].pos_z as f64 + quad[1].pos_z as f64 + quad[2].pos_z as f64 + quad[3].pos_z as f64) / 4.0;
+        let grid_x = (avg_pos_x / grid_size.0).round() as i32;
+        let grid_y = (avg_pos_y / grid_size.1).round() as i32;
+        let grid_z = (avg_pos_z / grid_size.2).round() as i32;
+        let map_entry = (grid_x as i128) | (grid_y as i128) << 32 | (grid_z as i128) << 64;
+
+        // Create entry in grid map if it didn't exist yet
+        if mesh_grid.get(&map_entry).is_none() {
+            mesh_grid.insert(map_entry, MeshGridEntry{triangles: Vec::new(), quads: Vec::new()});
+        }
+
+        // Add this triangle to that mesh
+        let mesh_psx = mesh_grid.get_mut(&map_entry).unwrap();
+        mesh_psx.quads.push(quad[0]);
+        mesh_psx.quads.push(quad[1]);
+        mesh_psx.quads.push(quad[2]);
+        mesh_psx.quads.push(quad[3]);
+    }
+
+    for (_grid_entry, mesh) in mesh_grid {
+        let n_triangles = mesh.triangles.len() / 3;
+        let n_quads = mesh.quads.len() / 4;
         let mut combined_vector = Vec::<VertexPSX>::new();
-        combined_vector.extend(triangles);
-        combined_vector.extend(quads);
+        combined_vector.extend(mesh.triangles);
+        combined_vector.extend(mesh.quads);
         model_psx.meshes.push(MeshPSX {
             verts: combined_vector,
             n_triangles,
@@ -180,7 +238,7 @@ fn main() {
             };
             for fade_level in 0..16 {
                 for color in &palette {
-                    let color: u16 = (color.a as u16).clamp(0, 1) << 15
+                    let mut color16: u16 = (color.a as u16).clamp(0, 1) << 15
                         | ((((fade_level * color_b.b as u16)
                             + ((15 - fade_level) * color.b as u16))
                             / 15)
@@ -199,7 +257,10 @@ fn main() {
                             >> 3)
                             .clamp(0, 31)
                             << 0;
-                    tex_cell.palette.push(color);
+                    if color.a == 0 {
+                        color16 = 0;
+                    }
+                    tex_cell.palette.push(color16);
                 }
             }
 
