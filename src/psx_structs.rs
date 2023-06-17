@@ -14,6 +14,38 @@ pub struct VertexPSX {
     pub texture_id: u8,
 }
 
+#[derive(Clone, Copy)]
+pub struct CollVertexPSX {
+    pub pos_x: i16,
+    pub pos_y: i16,
+    pub pos_z: i16,
+    pub terrain_id: u16,
+}
+
+pub struct CollModelPSX {
+    pub verts: Vec<CollVertexPSX>,
+}
+impl CollModelPSX {
+    pub fn save(&self, output_col: &Path) {
+        // Open output file
+        let mut file = File::create(output_col).unwrap();
+
+        // Write file magic
+        validate(file.write("FCOL".as_bytes()));
+
+        // Write number of triangles
+        validate(file.write((self.verts.len() as u32).to_le_bytes().as_slice()));
+
+        // Write triangle data
+        for vert in &self.verts {
+            validate(file.write(vert.pos_x.to_le_bytes().as_slice()));
+            validate(file.write(vert.pos_y.to_le_bytes().as_slice()));
+            validate(file.write(vert.pos_z.to_le_bytes().as_slice()));
+            validate(file.write(vert.terrain_id.to_le_bytes().as_slice()));
+        }
+    }
+}
+
 pub struct MeshPSX {
     pub verts: Vec<VertexPSX>,
     pub n_triangles: usize,
@@ -73,6 +105,17 @@ impl VertexPSX {
         bytes.extend(self.tex_u.to_le_bytes());
         bytes.extend(self.tex_v.to_le_bytes());
         bytes.extend(self.texture_id.to_le_bytes());
+        bytes
+    }
+}
+
+impl CollVertexPSX {
+    pub fn get_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend(self.pos_x.to_le_bytes());
+        bytes.extend(self.pos_y.to_le_bytes());
+        bytes.extend(self.pos_z.to_le_bytes());
+        bytes.extend(self.terrain_id.to_le_bytes());
         bytes
     }
 }
