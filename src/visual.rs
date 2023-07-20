@@ -131,6 +131,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
         mesh_map.insert(model.name.clone(), MeshGridEntry { triangles, quads });
     }
 
+    // Recombine separated meshes based on mesh name
     for (key, value) in mesh_map {
         let n_triangles = value.triangles.len() / 3;
         let n_quads = value.quads.len() / 4;
