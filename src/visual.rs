@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use exoquant::{convert_to_indexed, ditherer, optimizer, Color};
-use tobj::LoadOptions;
+use tobj::{LoadOptions, Mesh};
 
 use crate::{
     psx_structs::{MeshPSX, ModelPSX, TextureCellPSX, TextureCollectionPSX, VertexPSX},
@@ -20,13 +20,21 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
 
     let mut model_psx = ModelPSX::new();
     let mut txc_psx = TextureCollectionPSX::new();
-    let mut triangles = Vec::<VertexPSX>::new();
-    let mut quads = Vec::<VertexPSX>::new();
+    let mut mesh_map: HashMap<String, MeshGridEntry> = HashMap::new();
 
     // Loop over every mesh in the model. We want to combine them all.
     for model in &models {
         println!("parsing {}", model.name);
         let mut curr_index = 0;
+        let mut triangles;
+        let mut quads;
+        if mesh_map.contains_key(&model.name) {
+            triangles = mesh_map.get(&model.name).unwrap().triangles.clone();
+            quads = mesh_map.get(&model.name).unwrap().quads.clone();
+        } else {
+            triangles = Vec::new();
+            quads = Vec::new();
+        }
 
         let face_arities = match model.mesh.face_arities.is_empty() {
             false => model.mesh.face_arities.clone(),
@@ -63,110 +71,78 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
             }
             match arity {
                 3 => {
+                    // Find size of triangle's bounding box and store it in the second primitive's tex_id field
+                    let mut x_min = i32::MAX;
+                    let mut y_min = i32::MAX;
+                    let mut z_min = i32::MAX;
+                    let mut x_max = i32::MIN;
+                    let mut y_max = i32::MIN;
+                    let mut z_max = i32::MIN;
+                    for i in [0, 2, 1] {
+                        x_min = x_min.min(curr_primitive[i].pos_x as i32);
+                        y_min = y_min.min(curr_primitive[i].pos_y as i32);
+                        z_min = z_min.min(curr_primitive[i].pos_z as i32);
+                        x_max = x_max.max(curr_primitive[i].pos_x as i32);
+                        y_max = y_max.max(curr_primitive[i].pos_y as i32);
+                        z_max = z_max.max(curr_primitive[i].pos_z as i32);
+                    }
+                    x_max -= x_min;
+                    y_max -= y_min;
+                    z_max -= z_min;
+                    let size = ((x_max*x_max + y_max*y_max + z_max*z_max) as f64).sqrt();
+                    curr_primitive[2].texture_id = (size / 16.0).clamp(0.0, 255.0) as u8; // bigger number means bigger primitive
+            
                     for i in [0, 2, 1] {
                         triangles.push(curr_primitive[i]);
                     }
                 },
                 4 => {
+                    // Find size of quad's bounding box and store it in the second primitive's tex_id field
+                    let mut x_min = i32::MAX;
+                    let mut y_min = i32::MAX;
+                    let mut z_min = i32::MAX;
+                    let mut x_max = i32::MIN;
+                    let mut y_max = i32::MIN;
+                    let mut z_max = i32::MIN;
+                    for i in [0, 3, 1, 2] {
+                        x_min = x_min.min(curr_primitive[i].pos_x as i32);
+                        y_min = y_min.min(curr_primitive[i].pos_y as i32);
+                        z_min = z_min.min(curr_primitive[i].pos_z as i32);
+                        x_max = x_max.max(curr_primitive[i].pos_x as i32);
+                        y_max = y_max.max(curr_primitive[i].pos_y as i32);
+                        z_max = z_max.max(curr_primitive[i].pos_z as i32);
+                    }
+                    x_max -= x_min;
+                    y_max -= y_min;
+                    z_max -= z_min;
+                    let size = ((x_max*x_max + y_max*y_max + z_max*z_max) as f64).sqrt();
+                    curr_primitive[3].texture_id = (size / 16.0).clamp(0.0, 255.0) as u8; // bigger number means bigger primitive
+            
                     for i in [0, 3, 1, 2]{
                         quads.push(curr_primitive[i]);
                     }
                 },
                 _ => println!("found polygon with more than 4 vertices! make sure the mesh only contains triangles and quads."),
             };
-
+            
             curr_index += arity;
         }
+
+        mesh_map.insert(model.name.clone(), MeshGridEntry { triangles, quads });
     }
 
-    // Now that we have all the geometry, separated by triangle and quad, split it on a grid
-    let grid_size = (500.0, 500000.0, 500.0);
-    let mut mesh_grid: HashMap<i128, MeshGridEntry> = HashMap::new();
-
-    for triangle in triangles.chunks(3) {
-        // Find which gridcell this triangle belongs to
-        let avg_pos_x =
-            (triangle[0].pos_x as f64 + triangle[1].pos_x as f64 + triangle[2].pos_x as f64) / 3.0;
-        let avg_pos_y =
-            (triangle[0].pos_y as f64 + triangle[1].pos_y as f64 + triangle[2].pos_y as f64) / 3.0;
-        let avg_pos_z =
-            (triangle[0].pos_z as f64 + triangle[1].pos_z as f64 + triangle[2].pos_z as f64) / 3.0;
-        let grid_x = (avg_pos_x / grid_size.0).round() as i32;
-        let grid_y = (avg_pos_y / grid_size.1).round() as i32;
-        let grid_z = (avg_pos_z / grid_size.2).round() as i32;
-        let map_entry = (grid_x as i128) | (grid_y as i128) << 32 | (grid_z as i128) << 64;
-
-        // Create entry in grid map if it didn't exist yet
-        if mesh_grid.get(&map_entry).is_none() {
-            mesh_grid.insert(
-                map_entry,
-                MeshGridEntry {
-                    triangles: Vec::new(),
-                    quads: Vec::new(),
-                },
-            );
-        }
-
-        // Add this triangle to that mesh
-        let mesh_psx = mesh_grid.get_mut(&map_entry).unwrap();
-        mesh_psx.triangles.push(triangle[0]);
-        mesh_psx.triangles.push(triangle[1]);
-        mesh_psx.triangles.push(triangle[2]);
-    }
-
-    for quad in quads.chunks(4) {
-        // Find which gridcell this triangle belongs to
-        let avg_pos_x = (quad[0].pos_x as f64
-            + quad[1].pos_x as f64
-            + quad[2].pos_x as f64
-            + quad[3].pos_x as f64)
-            / 4.0;
-        let avg_pos_y = (quad[0].pos_y as f64
-            + quad[1].pos_y as f64
-            + quad[2].pos_y as f64
-            + quad[3].pos_y as f64)
-            / 4.0;
-        let avg_pos_z = (quad[0].pos_z as f64
-            + quad[1].pos_z as f64
-            + quad[2].pos_z as f64
-            + quad[3].pos_z as f64)
-            / 4.0;
-        let grid_x = (avg_pos_x / grid_size.0).round() as i32;
-        let grid_y = (avg_pos_y / grid_size.1).round() as i32;
-        let grid_z = (avg_pos_z / grid_size.2).round() as i32;
-        let map_entry = (grid_x as i128) | (grid_y as i128) << 32 | (grid_z as i128) << 64;
-
-        // Create entry in grid map if it didn't exist yet
-        if mesh_grid.get(&map_entry).is_none() {
-            mesh_grid.insert(
-                map_entry,
-                MeshGridEntry {
-                    triangles: Vec::new(),
-                    quads: Vec::new(),
-                },
-            );
-        }
-
-        // Add this triangle to that mesh
-        let mesh_psx = mesh_grid.get_mut(&map_entry).unwrap();
-        mesh_psx.quads.push(quad[0]);
-        mesh_psx.quads.push(quad[1]);
-        mesh_psx.quads.push(quad[2]);
-        mesh_psx.quads.push(quad[3]);
-    }
-
-    for (_grid_entry, mesh) in mesh_grid {
-        let n_triangles = mesh.triangles.len() / 3;
-        let n_quads = mesh.quads.len() / 4;
+    for (key, value) in mesh_map {
+        let n_triangles = value.triangles.len() / 3;
+        let n_quads = value.quads.len() / 4;
         let mut combined_vector = Vec::<VertexPSX>::new();
-        combined_vector.extend(mesh.triangles);
-        combined_vector.extend(mesh.quads);
+        combined_vector.extend(value.triangles);
+        combined_vector.extend(value.quads);
         model_psx.meshes.push(MeshPSX {
             verts: combined_vector,
             n_triangles,
             n_quads,
         });
-        println!("{n_triangles} triangles and {n_quads} quads processed");
+        println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
     }
 
     if let Ok(materials) = materials {
