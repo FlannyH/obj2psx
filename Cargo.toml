@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.3.4", features = ["derive"] }
+colors-transform = "0.2.11"
 exoquant = "0.2.0"
 stb_image = "0.2.5"
 tobj = "4.0.0"

@@ -47,6 +47,14 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
             let mut curr_primitive = Vec::<VertexPSX>::new();
             for in_face_index in curr_index as usize..(curr_index + arity) as usize {
                 let index = model.mesh.indices[in_face_index] as usize;
+                let (h, mut s, mut l) = rgb_to_hsl((
+                    model.mesh.vertex_color[index * 3 + 0],
+                    model.mesh.vertex_color[index * 3 + 1],
+                    model.mesh.vertex_color[index * 3 + 2]
+                ));
+                //l = l.powf(1.0/1.0);
+                s *= 1.25;
+                let (r, g, b) = hsl_to_rgb((h, s, l));
                 let vert = VertexPSX {
                     pos_x: (model.mesh.positions[index * 3 + 0] * -1024.0).clamp(-32768.0, 32767.0)
                         as i16,
@@ -54,11 +62,11 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
                         as i16,
                     pos_z: (model.mesh.positions[index * 3 + 2] * 1024.0).clamp(-32768.0, 32767.0)
                         as i16,
-                    color_r: (model.mesh.vertex_color[index * 3 + 0] * 255.0).clamp(0.0, 255.0)
+                    color_r: (r * 255.0).clamp(0.0, 255.0)
                         as u8,
-                    color_g: (model.mesh.vertex_color[index * 3 + 1] * 255.0).clamp(0.0, 255.0)
+                    color_g: (g * 255.0).clamp(0.0, 255.0)
                         as u8,
-                    color_b: (model.mesh.vertex_color[index * 3 + 2] * 255.0).clamp(0.0, 255.0)
+                    color_b: (b * 255.0).clamp(0.0, 255.0)
                         as u8,
                     tex_u: (model.mesh.texcoords[index * 2 + 0] * 255.0) as u8,
                     tex_v: (model.mesh.texcoords[index * 2 + 1] * 255.0) as u8,
@@ -131,19 +139,65 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
         mesh_map.insert(model.name.clone(), MeshGridEntry { triangles, quads });
     }
 
+    let mode = 0;
+
     // Recombine separated meshes based on mesh name
-    for (key, value) in mesh_map {
-        let n_triangles = value.triangles.len() / 3;
-        let n_quads = value.quads.len() / 4;
-        let mut combined_vector = Vec::<VertexPSX>::new();
-        combined_vector.extend(value.triangles);
-        combined_vector.extend(value.quads);
-        model_psx.meshes.push(MeshPSX {
-            verts: combined_vector,
-            n_triangles,
-            n_quads,
-        });
-        println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
+    if mode == 0 {
+        for (key, value) in &mesh_map {
+            let n_triangles = value.triangles.len() / 3;
+            let n_quads = value.quads.len() / 4;
+            let mut combined_vector = Vec::<VertexPSX>::new();
+            combined_vector.extend(&value.triangles);
+            combined_vector.extend(&value.quads);
+            model_psx.meshes.push(MeshPSX {
+                verts: combined_vector,
+                n_triangles,
+                n_quads,
+            });
+            println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
+        }
+    }
+
+    // Combined meshes based on 3D grid
+    if mode == 1 {
+        let mut grid_map = HashMap::<(i16, i16, i16), MeshGridEntry>::new();
+        for value in mesh_map.values() {
+            let grid_size = (1800.0, 8000.0, 1800.0);
+            for triangle in value.triangles.chunks(3) {
+                // Find which gridcell this triangle belongs to
+                let avg_pos_x = (triangle[0].pos_x as f64 + triangle[1].pos_x as f64 + triangle[2].pos_x as f64) / 3.0;
+                let avg_pos_y = (triangle[0].pos_y as f64 + triangle[1].pos_y as f64 + triangle[2].pos_y as f64) / 3.0;
+                let avg_pos_z = (triangle[0].pos_z as f64 + triangle[1].pos_z as f64 + triangle[2].pos_z as f64) / 3.0;
+                let grid_x = (avg_pos_x / grid_size.0) as i16;
+                let grid_y = (avg_pos_y / grid_size.1) as i16;
+                let grid_z = (avg_pos_z / grid_size.2) as i16;
+                let mut mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                mesh_psx.triangles.extend(triangle);
+            }
+            for quad in value.quads.chunks(4) {
+                // Find which gridcell this triangle belongs to
+                let avg_pos_x = (quad[0].pos_x as f64 + quad[1].pos_x as f64 + quad[2].pos_x as f64 + quad[3].pos_x as f64) / 3.0;
+                let avg_pos_y = (quad[0].pos_y as f64 + quad[1].pos_y as f64 + quad[2].pos_y as f64 + quad[3].pos_y as f64) / 3.0;
+                let avg_pos_z = (quad[0].pos_z as f64 + quad[1].pos_z as f64 + quad[2].pos_z as f64 + quad[3].pos_z as f64) / 3.0;
+                let grid_x = (avg_pos_x / grid_size.0) as i16;
+                let grid_y = (avg_pos_y / grid_size.1) as i16;
+                let grid_z = (avg_pos_z / grid_size.2) as i16;
+                let mut mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                mesh_psx.quads.extend(quad);
+            }
+        }
+        for (key, mesh) in grid_map {
+            let n_triangles = mesh.triangles.len() / 3;
+            let n_quads = mesh.quads.len() / 4;
+            let mut combined_vector = Vec::<VertexPSX>::new();
+            combined_vector.extend(mesh.triangles);
+            combined_vector.extend(mesh.quads);
+            model_psx.meshes.push(MeshPSX {
+                verts: combined_vector,
+                n_triangles,
+                n_quads,
+            });
+        }
     }
 
     if let Ok(materials) = materials {
@@ -263,7 +317,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
                 if (i + 1) < indexed_data.len() {
                     tex_cell
                         .texture_data
-                        .push((indexed_data[i + 0] << 4) | (indexed_data[i + 1]));
+                        .push((indexed_data[i + 1] << 4) | (indexed_data[i + 0]));
                 } else {
                     tex_cell.texture_data.push(0);
                     tex_cell.texture_data.push(0);
@@ -280,4 +334,55 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
 
     model_psx.save(Path::new(&output_msh)).unwrap();
     txc_psx.save(Path::new(&output_txc)).unwrap();
+}
+
+fn rgb_to_hsl(rgb: (f32, f32, f32)) -> (f32, f32, f32) {
+    let (r, g, b) = rgb;
+    let min = r.min(g).min(b);
+    let max = r.max(g).max(b);
+    let delta = max - min;
+
+    let l = (max + min) / 2.0;
+    let s = if delta == 0.0 {
+        0.0
+    } else {
+        delta / (1.0 - (2.0 * l - 1.0).abs())
+    };
+
+    let h = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+
+    let h = if h < 0.0 { h + 360.0 } else { h };
+
+    (h, s, l)
+}
+
+fn hsl_to_rgb(hsl: (f32, f32, f32)) -> (f32, f32, f32) {
+    let (h, s, l) = hsl;
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    (r + m, g + m, b + m)
 }
