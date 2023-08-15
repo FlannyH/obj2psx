@@ -8,7 +8,7 @@ use crate::{
     MeshGridEntry,
 };
 
-pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
+pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool) {
     let (models, materials) = tobj::load_obj(
         &input_obj,
         &LoadOptions {
@@ -69,7 +69,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
                     color_b: (b * 255.0).clamp(0.0, 255.0)
                         as u8,
                     tex_u: (model.mesh.texcoords[index * 2 + 0] * 255.0) as u8,
-                    tex_v: (model.mesh.texcoords[index * 2 + 1] * 255.0) as u8,
+                    tex_v: (255.0 - (model.mesh.texcoords[index * 2 + 1] * 255.0)) as u8,
                     texture_id: match model.mesh.material_id {
                         None => 255,
                         Some(a) => a as u8,
@@ -204,6 +204,8 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
         for material in materials {
             let mut tex_data_src = vec![0xFF; 64 * 64 * 4];
             let mut depth = 4;
+            let mut width = 64;
+            let mut height = 64;
             let mut name = String::from("none");
 
             if material.diffuse_texture.is_some() {
@@ -222,6 +224,8 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
                 if let Some(raw_image) = raw_image {
                     tex_data_src = raw_image.data;
                     depth = raw_image.depth;
+                    width = raw_image.width;
+                    height = raw_image.height;
                 }
             }
 
@@ -272,8 +276,8 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
             }
             let (palette, indexed_data) = convert_to_indexed(
                 &tex_data_exoquant,
-                64,
-                16,
+                width,
+                match using_texture_page {false => 16, true => 256},
                 &optimizer::KMeans,
                 &ditherer::Ordered,
             );
@@ -313,16 +317,32 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String) {
 
             // Convert indices to 4 bit
             println!("{:?}", indexed_data.len());
-            for i in (0..(64 * 64)).step_by(2) {
-                if (i + 1) < indexed_data.len() {
-                    tex_cell
-                        .texture_data
-                        .push((indexed_data[i + 1] << 4) | (indexed_data[i + 0]));
-                } else {
-                    tex_cell.texture_data.push(0);
-                    tex_cell.texture_data.push(0);
-                    tex_cell.texture_data.push(0);
-                    tex_cell.texture_data.push(0);
+            if using_texture_page {
+                for i in 0..(width * height) {
+                    if i < indexed_data.len() {
+                        tex_cell
+                            .texture_data
+                            .push(indexed_data[i]);
+                    } else {
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                    }
+                }
+            }
+            else {
+                for i in (0..(width * height)).step_by(2) {
+                    if (i + 1) < indexed_data.len() {
+                        tex_cell
+                            .texture_data
+                            .push((indexed_data[i + 1] << 4) | (indexed_data[i + 0]));
+                    } else {
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                        tex_cell.texture_data.push(0);
+                    }
                 }
             }
 
