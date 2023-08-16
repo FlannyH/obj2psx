@@ -143,7 +143,12 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
 
     // Recombine separated meshes based on mesh name
     if mode == 0 {
-        for (key, value) in &mesh_map {
+        // Sort in alphabet order
+        let mut sorted_keys: Vec<&String> = mesh_map.keys().collect();
+        sorted_keys.sort();
+
+        for key in sorted_keys {
+            let value = &mesh_map[key];
             let n_triangles = value.triangles.len() / 3;
             let n_quads = value.quads.len() / 4;
             let mut combined_vector = Vec::<VertexPSX>::new();
@@ -186,7 +191,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 mesh_psx.quads.extend(quad);
             }
         }
-        for (key, mesh) in grid_map {
+        for (_key, mesh) in grid_map {
             let n_triangles = mesh.triangles.len() / 3;
             let n_quads = mesh.quads.len() / 4;
             let mut combined_vector = Vec::<VertexPSX>::new();
