@@ -158,6 +158,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 verts: combined_vector,
                 n_triangles,
                 n_quads,
+                name: key.clone(),
             });
             println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
         }
@@ -201,6 +202,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 verts: combined_vector,
                 n_triangles,
                 n_quads,
+                name: "(null)".to_string(),
             });
         }
     }

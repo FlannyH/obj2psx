@@ -50,6 +50,7 @@ pub struct MeshPSX {
     pub verts: Vec<VertexPSX>,
     pub n_triangles: usize,
     pub n_quads: usize,
+    pub name: String,
 }
 
 pub struct ModelPSX {
@@ -168,44 +169,53 @@ impl ModelPSX {
 
         // Open output file
         let mut file = File::create(path)?;
+        let mut raw_data = Vec::<u8>::new();
 
-        // Write file magic
-        validate(file.write("FMSH".as_bytes()));
-
-        // Write number of submeshes
-        validate(file.write(&(self.meshes.len() as u32).to_le_bytes()));
-
-        // The offset into the MeshDesc array is zero here
-        // Let's just define it to always be this way
-        validate(file.write(&(0u32).to_le_bytes()));
-
-        // The vertex data is stored right after the MeshDesc array, but it's aligned to 4 bytes so the PS1 doesn't crap all over itself trying to load it
-        let vertex_data_offset = (mesh_descs.len() * 20 + 0x03) & !0x03;
-        let delta_offset = vertex_data_offset - mesh_descs.len() * 20;
-
-        // Write the offset to the vertex data
-        validate(file.write(&(vertex_data_offset as u32).to_le_bytes()));
-
+        // Mesh descs
+        let offset_mesh_desc = raw_data.len();
         for value in mesh_descs {
-            validate(file.write(&value.vertex_start.to_le_bytes()));
-            validate(file.write(&value.n_triangles.to_le_bytes()));
-            validate(file.write(&value.n_quads.to_le_bytes()));
-            validate(file.write(&value.x_min.to_le_bytes()));
-            validate(file.write(&value.x_max.to_le_bytes()));
-            validate(file.write(&value.y_min.to_le_bytes()));
-            validate(file.write(&value.y_max.to_le_bytes()));
-            validate(file.write(&value.z_min.to_le_bytes()));
-            validate(file.write(&value.z_max.to_le_bytes()));
-            validate(file.write(&(0u16).to_le_bytes()));
+            raw_data.extend(&value.vertex_start.to_le_bytes());
+            raw_data.extend(&value.n_triangles.to_le_bytes());
+            raw_data.extend(&value.n_quads.to_le_bytes());
+            raw_data.extend(&value.x_min.to_le_bytes());
+            raw_data.extend(&value.x_max.to_le_bytes());
+            raw_data.extend(&value.y_min.to_le_bytes());
+            raw_data.extend(&value.y_max.to_le_bytes());
+            raw_data.extend(&value.z_min.to_le_bytes());
+            raw_data.extend(&value.z_max.to_le_bytes());
+            raw_data.extend(&(0u16).to_le_bytes());
         }
 
-        for _ in 0..delta_offset {
-            validate(file.write(&[0x69]));
+        // Align to word
+        while raw_data.len() % 4 != 0 {
+            raw_data.push(0);
         }
 
+        // Vertex data
+        let offset_vertex_data = raw_data.len();
         for vertex in raw_vertex_data {
-            validate(file.write(&vertex.get_bytes()));
+            raw_data.extend(&vertex.get_bytes());
         }
+
+        // Align to word
+        while raw_data.len() % 4 != 0 {
+            raw_data.push(0);
+        }
+
+        // Mesh names
+        let offset_mesh_names = raw_data.len();
+        for mesh in self.meshes.as_slice() {
+            raw_data.extend(&(mesh.name.len() as u32).to_le_bytes());
+            raw_data.extend(mesh.name.as_bytes());
+        }
+
+        // Write everything
+        validate(file.write("FMSH".as_bytes())); // file_magic
+        validate(file.write(&(self.meshes.len() as u32).to_le_bytes())); //n_submeshes
+        validate(file.write(&(offset_mesh_desc as u32).to_le_bytes()));
+        validate(file.write(&(offset_vertex_data as u32).to_le_bytes()));
+        validate(file.write(&(offset_mesh_names as u32).to_le_bytes()));
+        validate(file.write(raw_data.as_slice()));
 
         Ok(0)
     }
