@@ -5,14 +5,15 @@ use std::path::Path;
 use stb_image::stb_image::bindgen::stbi_set_flip_vertically_on_load;
 
 use crate::psx_structs::VertexPSX;
+mod bsp;
 mod collision;
 mod helpers;
 mod psx_structs;
-mod visual;
 mod texture_page;
+mod visual;
 use clap::Parser;
 
-struct MeshGridEntry {
+pub struct MeshGridEntry {
     triangles: Vec<VertexPSX>,
     quads: Vec<VertexPSX>,
 }
@@ -57,18 +58,20 @@ fn main() {
                 output + ".col",
             ),
         };
-        
+
         match args.collision {
             false => visual::obj2msh_txc(input, output_msh, output_txc, args.page),
             true => collision::obj2col(input, output_col),
         }
         return;
-    }   
+    }
     if input.ends_with(".png") {
         let output_txc = match args.output {
             None => args.input.replace(".png", ".txc"),
             Some(output) => output,
         };
-        texture_page::txc_from_page(Path::new(&input)).save(Path::new(&output_txc)).unwrap();
+        texture_page::txc_from_page(Path::new(&input))
+            .save(Path::new(&output_txc))
+            .unwrap();
     }
 }
