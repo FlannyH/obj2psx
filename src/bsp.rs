@@ -73,7 +73,7 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> V
                 v2: Vec3 {x: quad[2].pos_x as f32, y: quad[2].pos_y as f32, z: quad[2].pos_z as f32},
                 v3: Vec3 {x: quad[3].pos_x as f32, y: quad[3].pos_y as f32, z: quad[3].pos_z as f32},
             }, &quad));
-            i += 3;
+            i += 4;
         }
     }
 
