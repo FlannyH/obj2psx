@@ -207,7 +207,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
         }
     }
     if mode == 2 {
-        let mesh_entries = split_bsp(mesh_map, 100);
+        let mesh_entries = split_bsp(mesh_map, 250);
         for mesh in mesh_entries {
             let n_triangles = mesh.triangles.len() / 3;
             let n_quads = mesh.quads.len() / 4;
