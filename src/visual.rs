@@ -5,7 +5,7 @@ use tobj::{LoadOptions, Mesh};
 
 use crate::{
     psx_structs::{MeshPSX, ModelPSX, TextureCellPSX, TextureCollectionPSX, VertexPSX},
-    MeshGridEntry,
+    MeshGridEntry, bsp::split_bsp,
 };
 
 pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool) {
@@ -139,7 +139,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
         mesh_map.insert(model.name.clone(), MeshGridEntry { triangles, quads });
     }
 
-    let mode = 0;
+    let mode = 2;
 
     // Recombine separated meshes based on mesh name
     if mode == 0 {
@@ -193,6 +193,22 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             }
         }
         for (_key, mesh) in grid_map {
+            let n_triangles = mesh.triangles.len() / 3;
+            let n_quads = mesh.quads.len() / 4;
+            let mut combined_vector = Vec::<VertexPSX>::new();
+            combined_vector.extend(mesh.triangles);
+            combined_vector.extend(mesh.quads);
+            model_psx.meshes.push(MeshPSX {
+                verts: combined_vector,
+                n_triangles,
+                n_quads,
+                name: "(null)".to_string(),
+            });
+        }
+    }
+    if mode == 2 {
+        let mesh_entries = split_bsp(mesh_map, 100);
+        for mesh in mesh_entries {
             let n_triangles = mesh.triangles.len() / 3;
             let n_quads = mesh.quads.len() / 4;
             let mut combined_vector = Vec::<VertexPSX>::new();

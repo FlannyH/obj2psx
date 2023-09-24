@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use glam::Vec3;
-use crate::MeshGridEntry;
+use crate::{MeshGridEntry, psx_structs::VertexPSX};
 
 #[derive(Copy, Clone)]
 struct Triangle {
@@ -23,10 +23,10 @@ struct Plane {
     normal: Vec3,
 }
 
-struct BspTree {
+struct BspTree<'a> {
     nodes: Vec::<BspNode>,
     indices: Vec::<u32>,
-    polygons: Vec::<Polygon>,
+    polygons: Vec::<Polygon<'a>>,
 }
 
 struct BspNodeParent {
@@ -47,30 +47,33 @@ enum BspNode {
 }
 
 #[derive(Copy, Clone)]
-enum Polygon {
-    Triangle(Triangle),
-    Quad(Quad),
+enum Polygon<'a> {
+    Triangle(u32, Triangle, &'a [VertexPSX]),
+    Quad(u32, Quad, &'a [VertexPSX]),
 }
 
-pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) {
+pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> Vec::<MeshGridEntry> {
     let mut polygons = Vec::<Polygon>::new();
 
     // Get all polygons in one big buffer
+    let mut i = 0;
     for value in mesh_map.values() {
         for tri in value.triangles.chunks(3) {
-            polygons.push(Polygon::Triangle(Triangle {
+            polygons.push(Polygon::Triangle(i, Triangle {
                 v0: Vec3 {x: tri[0].pos_x as f32, y: tri[0].pos_y as f32, z: tri[0].pos_z as f32},
                 v1: Vec3 {x: tri[1].pos_x as f32, y: tri[1].pos_y as f32, z: tri[1].pos_z as f32},
                 v2: Vec3 {x: tri[2].pos_x as f32, y: tri[2].pos_y as f32, z: tri[2].pos_z as f32},
-            }))
+            }, &tri));
+            i += 3;
         }
         for quad in value.quads.chunks(4) {
-            polygons.push(Polygon::Quad(Quad {
+            polygons.push(Polygon::Quad(i, Quad {
                 v0: Vec3 {x: quad[0].pos_x as f32, y: quad[0].pos_y as f32, z: quad[0].pos_z as f32},
                 v1: Vec3 {x: quad[1].pos_x as f32, y: quad[1].pos_y as f32, z: quad[1].pos_z as f32},
                 v2: Vec3 {x: quad[2].pos_x as f32, y: quad[2].pos_y as f32, z: quad[2].pos_z as f32},
                 v3: Vec3 {x: quad[3].pos_x as f32, y: quad[3].pos_y as f32, z: quad[3].pos_z as f32},
-            }))
+            }, &quad));
+            i += 3;
         }
     }
 
@@ -82,37 +85,31 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) {
     };
     bsp_tree.nodes.push(BspNode::Parent(BspNodeParent { split_plane: Plane { position: Vec3::ZERO, normal: Vec3::ZERO }, child_node_index: 1, index_first_polygon: 0, polygon_count: bsp_tree.polygons.len() as _ }));
 
-    let mut node_subdivision_queue = Vec::<u32>::new();
+    let mut node_queue = Vec::<(u32 /*node_index*/, u32 /*rec_depth*/)>::new();
+    node_queue.push((0, 0));
+
+    let mut meshes = Vec::<MeshGridEntry>::new();
 
     loop {
-        match node_subdivision_queue.pop() {
-            Some(node_index) => {
-                subdivide(&mut bsp_tree, node_index, &mut node_subdivision_queue, poly_limit);
+        match node_queue.pop() {
+            Some((node_index, rec_depth)) => {
+                subdivide(&mut bsp_tree, node_index, rec_depth, &mut node_queue, poly_limit, &mut meshes);
             },
             None => break,
         }
     }
 
-    // todo: collect all leaf nodes and return it as Vec of meshes
+    return meshes;
 }
 
-fn subdivide(bsp: &mut BspTree, node_index: u32, stack: &mut Vec::<u32>, poly_limit: u32) {
+fn subdivide(bsp: &mut BspTree, node_index: u32, rec_depth: u32, stack: &mut Vec::<(u32, u32)>, poly_limit: u32, mesh_output: &mut Vec::<MeshGridEntry>) {
     let mut node = match &mut bsp.nodes[node_index as usize] {
         BspNode::Parent(n) => n,
         BspNode::Leaf(_) => unreachable!(), // If it's a leaf, we don't add it to the queue, so this never happens
     };
-    
-    // If this node reached below the polygon limit, make this a leaf
-    if node.polygon_count < poly_limit {
-        bsp.nodes[node_index as usize] = BspNode::Leaf(BspNodeLeaf {
-            index_first_polygon: node.index_first_polygon,
-            polygon_count: node.polygon_count,
-        });
-        return;
-    }
 
     // Find the split plane that creates the most equal split in terms of polygon count on either side
-    node.split_plane = find_split_plane(&bsp.polygons, &bsp.indices, 0, bsp.polygons.len() as u32);
+    node.split_plane = find_split_plane(&bsp.polygons, &bsp.indices, node.index_first_polygon, node.polygon_count);
 
     // Partition the polygons to front and behind the plane
     let split_index = partition(&mut bsp.indices, &bsp.polygons, node.split_plane, node.index_first_polygon, node.polygon_count);
@@ -120,9 +117,41 @@ fn subdivide(bsp: &mut BspTree, node_index: u32, stack: &mut Vec::<u32>, poly_li
     let start2 = split_index;
     let count1 = split_index - start1;
     let count2 = node.index_first_polygon + node.polygon_count - split_index;
+    // for _ in 0..rec_depth {
+    //     print!("  ");
+    // }
+    // println!("[{count1}, {count2}]");
+
+    // If this node reached below the polygon limit, or one of the split plane counts was 0
+    if (node.polygon_count < poly_limit) || (count1 == 0) || (count2 == 0) {
+        println!("leaf node reached ({} polygons)", node.polygon_count);
+        let start = node.index_first_polygon;
+        let end = start + node.polygon_count;
+
+        // Make this a leaf node
+        bsp.nodes[node_index as usize] = BspNode::Leaf(BspNodeLeaf {
+            index_first_polygon: node.index_first_polygon,
+            polygon_count: node.polygon_count,
+        });
+
+        // Create new MeshGridEntry and put all the polygons in it
+        let mut mesh = MeshGridEntry { triangles: Vec::new(), quads: Vec::new() };
+        for i_index in start..end {
+            let i_polygon = bsp.indices[i_index as usize];
+            let polygon = bsp.polygons[i_polygon as usize];
+            match polygon {
+                Polygon::Triangle(_, _, vertices) => mesh.triangles.extend_from_slice(vertices),
+                Polygon::Quad(_, _, vertices) => mesh.quads.extend_from_slice(vertices),
+            }
+        }
+
+        mesh_output.push(mesh);
+
+        return;
+    }
 
     // Create left node
-    stack.push(bsp.nodes.len() as u32);
+    stack.push((bsp.nodes.len() as u32, rec_depth + 1));
     bsp.nodes.push(BspNode::Parent(BspNodeParent {
         split_plane: find_split_plane(&bsp.polygons, &bsp.indices, start1, count1),
         child_node_index: 0,
@@ -131,7 +160,7 @@ fn subdivide(bsp: &mut BspTree, node_index: u32, stack: &mut Vec::<u32>, poly_li
     }));
 
     // Create right node
-    stack.push(bsp.nodes.len() as u32);
+    stack.push((bsp.nodes.len() as u32, rec_depth + 1));
     bsp.nodes.push(BspNode::Parent(BspNodeParent {
         split_plane: find_split_plane(&bsp.polygons, &bsp.indices, start2, count2),
         child_node_index: 0,
@@ -147,8 +176,8 @@ fn partition(indices: &mut Vec::<u32>, polygons: &Vec::<Polygon>, split_plane: P
     while i <= j {
         // Get polygon center
         let center = match &polygons[indices[i as usize] as usize] {
-            Polygon::Triangle(tri) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
-            Polygon::Quad(quad) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
+            Polygon::Triangle(_, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
+            Polygon::Quad(_, quad, _) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
         };
 
         // If the current polygon is in front of the triangle
@@ -174,13 +203,13 @@ fn find_split_plane(polygons: &Vec::<Polygon>, indices: &Vec::<u32>, start: u32,
 
         // Make plane from polygon
         let plane = match split_polygon {
-            Polygon::Triangle(tri) => {
+            Polygon::Triangle(_, tri, _) => {
                 Plane {
                     position: tri.v0,
                     normal: (tri.v1-tri.v0).cross(tri.v2-tri.v0),
                 }
             },
-            Polygon::Quad(quad) => {
+            Polygon::Quad(_, quad, _) => {
                 Plane {
                     position: quad.v0,
                     normal: (quad.v1-quad.v0).cross(quad.v2-quad.v0),
@@ -192,8 +221,8 @@ fn find_split_plane(polygons: &Vec::<Polygon>, indices: &Vec::<u32>, start: u32,
         let mut n_positive = 0;
         for compare_polygon in polygons {
             let compare_position = match compare_polygon {
-                Polygon::Triangle(tri) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
-                Polygon::Quad(quad) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
+                Polygon::Triangle(_, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
+                Polygon::Quad(_, quad, _) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
             };
 
             if (compare_position - plane.position).dot(plane.normal) > 0.0 {
