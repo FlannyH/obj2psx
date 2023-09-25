@@ -36,6 +36,10 @@ struct Cli {
     /// Whether this uses 8-bit 256x256 texture pages or 4-bit 64x64 texture cells
     #[arg(short, long)]
     page: bool,
+
+    /// Whether this mesh should be split into regions
+    #[arg(short, long)]
+    split: bool,
 }
 
 fn main() {
@@ -60,7 +64,7 @@ fn main() {
         };
 
         match args.collision {
-            false => visual::obj2msh_txc(input, output_msh, output_txc, args.page),
+            false => visual::obj2msh_txc(input, output_msh, output_txc, args.page, args.split),
             true => collision::obj2col(input, output_col),
         }
         return;

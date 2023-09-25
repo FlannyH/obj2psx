@@ -8,7 +8,7 @@ use crate::{
     MeshGridEntry, bsp::split_bsp,
 };
 
-pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool) {
+pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool, split: bool) {
     let (models, materials) = tobj::load_obj(
         &input_obj,
         &LoadOptions {
@@ -139,7 +139,10 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
         mesh_map.insert(model.name.clone(), MeshGridEntry { triangles, quads });
     }
 
-    let mode = 2;
+    let mode = match split {
+        true => 2,
+        false => 0,
+    };
 
     // Recombine separated meshes based on mesh name
     if mode == 0 {
