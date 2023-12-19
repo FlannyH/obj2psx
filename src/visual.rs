@@ -1,11 +1,11 @@
 use std::{collections::HashMap, path::Path};
 
 use exoquant::{convert_to_indexed, ditherer, optimizer, Color};
-use tobj::{LoadOptions, Mesh};
+use tobj::LoadOptions;
 
 use crate::{
     psx_structs::{MeshPSX, ModelPSX, TextureCellPSX, TextureCollectionPSX, VertexPSX},
-    MeshGridEntry, bsp::split_bsp,
+    MeshGridEntry, bsp::split_bsp, kmeans::kmeans_cluster,
 };
 
 pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool, split: bool) {
@@ -47,7 +47,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             let mut curr_primitive = Vec::<VertexPSX>::new();
             for in_face_index in curr_index as usize..(curr_index + arity) as usize {
                 let index = model.mesh.indices[in_face_index] as usize;
-                let (h, mut s, mut l) = rgb_to_hsl((
+                let (h, mut s, l) = rgb_to_hsl((
                     model.mesh.vertex_color[index * 3 + 0],
                     model.mesh.vertex_color[index * 3 + 1],
                     model.mesh.vertex_color[index * 3 + 2]
@@ -140,7 +140,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
     }
 
     let mode = match split {
-        true => 2,
+        true => 4,
         false => 0,
     };
 
@@ -166,9 +166,8 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
         }
     }
-
-    // Combined meshes based on 3D grid
-    if mode == 1 {
+    // 3D grid
+    else if mode == 1 {
         let mut grid_map = HashMap::<(i16, i16, i16), MeshGridEntry>::new();
         for value in mesh_map.values() {
             let grid_size = (1800.0, 8000.0, 1800.0);
@@ -180,7 +179,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 let grid_x = (avg_pos_x / grid_size.0) as i16;
                 let grid_y = (avg_pos_y / grid_size.1) as i16;
                 let grid_z = (avg_pos_z / grid_size.2) as i16;
-                let mut mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                let mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
                 mesh_psx.triangles.extend(triangle);
             }
             for quad in value.quads.chunks(4) {
@@ -191,7 +190,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 let grid_x = (avg_pos_x / grid_size.0) as i16;
                 let grid_y = (avg_pos_y / grid_size.1) as i16;
                 let grid_z = (avg_pos_z / grid_size.2) as i16;
-                let mut mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                let mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
                 mesh_psx.quads.extend(quad);
             }
         }
@@ -209,7 +208,8 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             });
         }
     }
-    if mode == 2 {
+    // BSP
+    else if mode == 2 {
         let mesh_entries = split_bsp(mesh_map, 250);
         for mesh in mesh_entries {
             let n_triangles = mesh.triangles.len() / 3;
@@ -223,6 +223,103 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 n_quads,
                 name: "(null)".to_string(),
             });
+        }
+    }
+    // K-means clustering
+    else if mode == 3 {
+        let mesh_entries = kmeans_cluster(mesh_map, 50);
+        for mesh in mesh_entries {
+            let n_triangles = mesh.triangles.len() / 3;
+            let n_quads = mesh.quads.len() / 4;
+            let mut combined_vector = Vec::<VertexPSX>::new();
+            combined_vector.extend(mesh.triangles);
+            combined_vector.extend(mesh.quads);
+            model_psx.meshes.push(MeshPSX {
+                verts: combined_vector,
+                n_triangles,
+                n_quads,
+                name: "(null)".to_string(),
+            });
+        }
+    }
+    // Equally split on mesh bounding box
+    else if mode == 4 {
+        let target_polygon_count_per_mesh = 120;
+
+        // Loop over each mesh
+        for (name, mesh) in mesh_map {
+            // Don't split if the number of polygons is low anyway
+            if mesh.triangles.len() + mesh.quads.len() < target_polygon_count_per_mesh {
+                // Create a mesh
+                let mut combined_verts = Vec::new();
+                combined_verts.extend(mesh.triangles.iter());
+                combined_verts.extend(mesh.quads.iter());
+                model_psx.meshes.push(MeshPSX {
+                    verts: combined_verts,
+                    n_triangles: mesh.triangles.len() / 3,
+                    n_quads: mesh.quads.len() / 4,
+                    name,
+                });
+                continue;
+            }
+
+            // Get bounding box
+            let (mut min_x, mut min_y, mut min_z) = (i16::MAX, i16::MAX, i16::MAX);
+            let (mut max_x, mut max_y, mut max_z) = (i16::MIN, i16::MIN, i16::MIN);
+            for vertex in &mesh.triangles {
+                min_x = min_x.min(vertex.pos_x);
+                min_y = min_y.min(vertex.pos_y);
+                min_z = min_z.min(vertex.pos_z);
+                max_x = max_x.max(vertex.pos_x);
+                max_y = max_y.max(vertex.pos_y);
+                max_z = max_z.max(vertex.pos_z);
+            }
+
+            for vertex in &mesh.quads {
+                min_x = min_x.min(vertex.pos_x);
+                min_y = min_y.min(vertex.pos_y);
+                min_z = min_z.min(vertex.pos_z);
+                max_x = max_x.max(vertex.pos_x);
+                max_y = max_y.max(vertex.pos_y);
+                max_z = max_z.max(vertex.pos_z);
+            }
+
+            // Calculate size
+            let (size_x, size_y, size_z) = (
+                max_x - min_x, 
+                max_y - min_y, 
+                max_z - min_z,
+            );
+
+            // Figure out the best split count - a bit expensive, since we brute force it, but that's fine for lower poly meshes like on PS1
+            let mut current_best: Vec<MeshPSX> = Vec::new();
+            let mut current_best_error = i64::MAX;
+            for splits_x in 1..6 {
+                for splits_y in 1..6 {
+                    for splits_z in 1..6 {
+                        let mut meshes_to_add : Vec<MeshPSX> = Vec::new();
+                        split_equal_based_on_aabb(&name, splits_z, min_z, size_z, splits_y, min_y, size_y, splits_x, min_x, size_x, &mesh, &mut meshes_to_add);
+
+                        // Calculate score. How big is the deviation from the target we want?
+                        let mut error = 0;
+                        for mesh in &meshes_to_add {
+                            error += (mesh.n_quads as i64 + mesh.n_triangles as i64 - target_polygon_count_per_mesh as i64).abs()
+                        }
+
+                        // Is it better than before? Store the result
+                        if error < current_best_error && meshes_to_add.len() != 0 {
+                            dbg!(meshes_to_add.len());
+                            current_best.clear();
+                            current_best.extend(meshes_to_add);
+                            current_best_error = error;
+                        }
+                    }
+                }
+            }
+
+            model_psx.meshes.extend(current_best);
+
+            dbg!(name, model_psx.meshes.len());
         }
     }
 
@@ -380,6 +477,102 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
 
     model_psx.save(Path::new(&output_msh)).unwrap();
     txc_psx.save(Path::new(&output_txc)).unwrap();
+}
+
+fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i16, splits_y: i16, min_y: i16, size_y: i16, splits_x: i16, min_x: i16, size_x: i16, mesh: &MeshGridEntry, meshes_to_add: &mut Vec<MeshPSX>) {
+    let mut coords_x = vec![i16::MIN];
+    let mut coords_y = vec![i16::MIN];
+    let mut coords_z = vec![i16::MIN];
+    for x in 0..(splits_x+1) {
+        coords_x.push(min_x + ((size_x as f64 / splits_x as f64) * x as f64).ceil() as i16);
+    }    
+    for y in 0..(splits_y+1) {
+        coords_y.push(min_y + ((size_y as f64 / splits_y as f64) * y as f64).ceil() as i16);
+    }    
+    for z in 0..(splits_z+1) {
+        coords_z.push(min_z + ((size_z as f64 / splits_z as f64) * z as f64).ceil() as i16);
+    }
+    coords_x[1] -= 1;
+    coords_y[1] -= 1;
+    coords_z[1] -= 1;
+    coords_x.push(i16::MAX);
+    coords_y.push(i16::MAX);
+    coords_z.push(i16::MAX);
+
+    for z in 0..(coords_z.len()-1) {
+        let (curr_min_z, curr_max_z) = (coords_z[z], coords_z[z+1]);
+        for y in 0..(coords_y.len()-1) {
+            let (curr_min_y, curr_max_y) = (coords_y[y], coords_y[y+1]);
+            for x in 0..(coords_x.len()-1) {
+                let (curr_min_x, curr_max_x) = (coords_x[x], coords_x[x+1]);
+                // Find all triangles where the center is inside that bounding box
+                let mut tris = Vec::<VertexPSX>::new();
+                let mut quads = Vec::<VertexPSX>::new();
+
+                // Select polygons that are inside the bounding box
+                {
+                    for triangle in mesh.triangles.chunks(3) {
+                        // Calculate center
+                        let (center_x, center_y, center_z) = (
+                            ((triangle[0].pos_x as i32 + triangle[1].pos_x as i32 + triangle[2].pos_x as i32) / 3) as i16,
+                            ((triangle[0].pos_y as i32 + triangle[1].pos_y as i32 + triangle[2].pos_y as i32) / 3) as i16,
+                            ((triangle[0].pos_z as i32 + triangle[1].pos_z as i32 + triangle[2].pos_z as i32) / 3) as i16,
+                        );
+
+                        // If it's in the bounding box
+                        if center_x > curr_min_x && center_x <= curr_max_x
+                        && center_y > curr_min_y && center_y <= curr_max_y
+                        && center_z > curr_min_z && center_z <= curr_max_z {
+                            if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
+                                println!("out of bounds triangle? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
+                            }
+                            tris.extend_from_slice(triangle);
+                        }
+                    }
+
+                    for quad in mesh.quads.chunks(4) {
+                        // Calculate center
+                        let (center_x, center_y, center_z) = (
+                            ((quad[0].pos_x as i32 + quad[1].pos_x as i32 + quad[2].pos_x as i32 + quad[3].pos_x as i32) / 4) as i16,
+                            ((quad[0].pos_y as i32 + quad[1].pos_y as i32 + quad[2].pos_y as i32 + quad[3].pos_y as i32) / 4) as i16,
+                            ((quad[0].pos_z as i32 + quad[1].pos_z as i32 + quad[2].pos_z as i32 + quad[3].pos_z as i32) / 4) as i16,
+                        );
+
+                        // If it's in the bounding box
+                        if center_x > curr_min_x && center_x <= curr_max_x
+                        && center_y > curr_min_y && center_y <= curr_max_y
+                        && center_z > curr_min_z && center_z <= curr_max_z {
+                            if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
+                                println!("out of bounds quad? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
+                            }
+                            quads.extend_from_slice(quad);
+                        }
+                    }
+                }
+            
+                // Filter out empty meshes
+                if tris.len() == 0 && quads.len() == 0 {
+                    continue;
+                }
+
+                // Create a mesh
+                let mut combined_verts = Vec::new();
+                combined_verts.extend(tris.iter());
+                combined_verts.extend(quads.iter());
+                meshes_to_add.push(MeshPSX {
+                    verts: combined_verts,
+                    n_triangles: tris.len() / 3,
+                    n_quads: quads.len() / 4,
+                    name: format!("{name} ({curr_min_x}, {curr_min_y}, {curr_min_z})"),
+                })
+            }
+        }
+    }
+    let input_vertices = mesh.quads.len() + mesh.triangles.len();
+    let mut output_vertices = 0;
+    for mesh in &mut *meshes_to_add {
+        output_vertices += mesh.verts.len();
+    }
 }
 
 fn rgb_to_hsl(rgb: (f32, f32, f32)) -> (f32, f32, f32) {

@@ -3,18 +3,18 @@ use glam::Vec3;
 use std::collections::HashMap;
 
 #[derive(Copy, Clone)]
-struct Triangle {
-    v0: Vec3,
-    v1: Vec3,
-    v2: Vec3,
+pub struct Triangle {
+    pub v0: Vec3,
+    pub v1: Vec3,
+    pub v2: Vec3,
 }
 
 #[derive(Copy, Clone)]
-struct Quad {
-    v0: Vec3,
-    v1: Vec3,
-    v2: Vec3,
-    v3: Vec3,
+pub struct Quad {
+    pub v0: Vec3,
+    pub v1: Vec3,
+    pub v2: Vec3,
+    pub v3: Vec3,
 }
 
 #[derive(Copy, Clone)]
@@ -47,7 +47,7 @@ enum BspNode {
 }
 
 #[derive(Copy, Clone)]
-enum Polygon<'a> {
+pub enum Polygon<'a> {
     Triangle(u32, Triangle, &'a [VertexPSX]),
     Quad(u32, Quad, &'a [VertexPSX]),
 }

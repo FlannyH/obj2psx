@@ -11,6 +11,7 @@ mod helpers;
 mod psx_structs;
 mod texture_page;
 mod visual;
+mod kmeans;
 use clap::Parser;
 
 pub struct MeshGridEntry {

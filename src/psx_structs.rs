@@ -161,7 +161,7 @@ impl ModelPSX {
                 z_max,
                 pad: 0,
             });
-            println!("{} verts", mesh.verts.len());
+            println!("{} verts ({} polygons)", mesh.verts.len(), mesh.n_quads + mesh.n_triangles);
             for vertex in &mesh.verts {
                 raw_vertex_data.push(*vertex);
             }
