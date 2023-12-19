@@ -244,7 +244,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
     }
     // Equally split on mesh bounding box
     else if mode == 4 {
-        let target_polygon_count_per_mesh = 120;
+        let target_polygon_count_per_mesh = 112;
 
         // Loop over each mesh
         for (name, mesh) in mesh_map {
