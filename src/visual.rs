@@ -244,7 +244,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
     }
     // Equally split on mesh bounding box
     else if mode == 4 {
-        let target_polygon_count_per_mesh = 112;
+        let target_polygon_count_per_mesh = 80;
 
         // Loop over each mesh
         for (name, mesh) in mesh_map {
@@ -294,6 +294,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             // Figure out the best split count - a bit expensive, since we brute force it, but that's fine for lower poly meshes like on PS1
             let mut current_best: Vec<MeshPSX> = Vec::new();
             let mut current_best_error = i64::MAX;
+            let (mut sx, mut sy, mut sz) = (0, 0, 0);
             for splits_x in 1..6 {
                 for splits_y in 1..6 {
                     for splits_z in 1..6 {
@@ -303,23 +304,27 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                         // Calculate score. How big is the deviation from the target we want?
                         let mut error = 0;
                         for mesh in &meshes_to_add {
-                            error += (mesh.n_quads as i64 + mesh.n_triangles as i64 - target_polygon_count_per_mesh as i64).abs()
+                            error += (mesh.n_quads as i64 + mesh.n_triangles as i64 - target_polygon_count_per_mesh as i64).abs();
+                            error += (splits_x - splits_y).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
+                            error += (splits_y - splits_z).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
+                            error += (splits_z - splits_x).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
                         }
 
                         // Is it better than before? Store the result
                         if error < current_best_error && meshes_to_add.len() != 0 {
-                            dbg!(meshes_to_add.len());
                             current_best.clear();
                             current_best.extend(meshes_to_add);
                             current_best_error = error;
+                            sx = splits_x;
+                            sy = splits_y;
+                            sz = splits_z;
                         }
                     }
                 }
             }
 
             model_psx.meshes.extend(current_best);
-
-            dbg!(name, model_psx.meshes.len());
+            dbg!(name, model_psx.meshes.len(), (sx, sy, sz));
         }
     }
 
