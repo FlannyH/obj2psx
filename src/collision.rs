@@ -3,7 +3,7 @@ use std::path::Path;
 use glam::I64Vec3;
 use tobj::LoadOptions;
 
-use crate::psx_structs::{CollModelPSX, CollVertexPSX};
+use crate::psx_structs::{CollModelPSX, CollVertexPSX, NavMeshNode};
 
 pub fn obj2col(input_obj: String, output_col: String) {
     let (models, _materials) = tobj::load_obj(
@@ -58,10 +58,55 @@ pub fn obj2col(input_obj: String, output_col: String) {
 
     let bvh = CollBvh::construct(triangles);
 
+    let mut navmesh_nodes = Vec::<NavMeshNode>::new();
+    for (center, primitive) in bvh.centers.iter().zip(&bvh.primitives) {
+        if primitive.normal.y < 2048 {
+            continue;
+        }
+        
+        let center_x16 = (center.x / 4096) as i16;
+        let center_y16 = (center.y / 4096) as i16;
+        let center_z16 = (center.z / 4096) as i16;
+        
+        navmesh_nodes.push(NavMeshNode {
+            pos_x: center_x16,
+            pos_y: center_y16,
+            pos_z: center_z16,
+            neighbors: [0, 0, 0, 0], // We fill this in below
+        });
+    }
+
+    // Naive approach to finding neighbors (closest cells)
+    for node1_index in 0..navmesh_nodes.len() {
+        // Add to circular buffer any time the value is lower than the last
+        let mut closest_distances = vec![f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
+        let mut closest_indices = vec![0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]; // Initialize to invalid value 0xFFFF, so we know when to end early if there's less neighbors
+        let mut circular_buffer_index = 0;
+
+        for node2_index in 0..navmesh_nodes.len() {
+            let node1 = &navmesh_nodes[node1_index];
+            let node2 = &navmesh_nodes[node2_index];
+            let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32, node1.pos_z as f32);
+            let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32, node2.pos_z as f32);
+            let distance = a.distance(b);
+            if distance < closest_distances[circular_buffer_index] {
+                closest_distances[circular_buffer_index] = distance;
+                closest_indices[circular_buffer_index] = node2_index;
+                circular_buffer_index += 1;
+                circular_buffer_index %= closest_distances.len();
+            }
+        }
+
+        for i in 0..4 {
+            navmesh_nodes[node1_index].neighbors[i] = closest_indices[i] as u16;
+        }
+    }
+
     let collision_model_psx = CollModelPSX { 
         triangles: bvh.primitives, 
         nodes: bvh.nodes, 
-        indices: bvh.indices 
+        indices: bvh.indices,
+        navmesh_nodes, 
     };
 
     collision_model_psx.save(Path::new(&output_col));
@@ -101,7 +146,7 @@ struct CollBvh {
     node_pointer: usize,
 }
 
-const COL_SCALE: i32 = -512;
+const COL_SCALE: i32 = 512;
 
 impl CollBvh {
     pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
@@ -115,9 +160,9 @@ impl CollBvh {
 
         // Get primitives and their center points
         for triangle in vertices.chunks_exact(3) {
-            let v0 = glam::IVec3::new(triangle[0].pos_x as i32 * COL_SCALE, triangle[0].pos_y as i32 * COL_SCALE, triangle[0].pos_z as i32 * COL_SCALE);
-            let v1 = glam::IVec3::new(triangle[1].pos_x as i32 * COL_SCALE, triangle[1].pos_y as i32 * COL_SCALE, triangle[1].pos_z as i32 * COL_SCALE);
-            let v2 = glam::IVec3::new(triangle[2].pos_x as i32 * COL_SCALE, triangle[2].pos_y as i32 * COL_SCALE, triangle[2].pos_z as i32 * COL_SCALE);
+            let v0 = glam::IVec3::new(triangle[0].pos_x as i32 * -COL_SCALE, triangle[0].pos_y as i32 * -COL_SCALE, triangle[0].pos_z as i32 * -COL_SCALE);
+            let v1 = glam::IVec3::new(triangle[1].pos_x as i32 * -COL_SCALE, triangle[1].pos_y as i32 * -COL_SCALE, triangle[1].pos_z as i32 * -COL_SCALE);
+            let v2 = glam::IVec3::new(triangle[2].pos_x as i32 * -COL_SCALE, triangle[2].pos_y as i32 * -COL_SCALE, triangle[2].pos_z as i32 * -COL_SCALE);
 
             // Calculate normal
             let edge_0_2 = (v2 - v0).as_vec3();

@@ -22,10 +22,18 @@ pub struct CollVertexPSX {
     pub terrain_id: u16,
 }
 
+pub struct NavMeshNode {
+    pub pos_x: i16,
+    pub pos_y: i16,
+    pub pos_z: i16,
+    pub neighbors: [u16; 4]
+}
+
 pub struct CollModelPSX {
     pub triangles: Vec<CollTrianglePSX>,
     pub nodes: Vec<BvhNode>,
     pub indices: Vec<u16>,
+    pub navmesh_nodes: Vec<NavMeshNode>,
 }
 
 impl CollModelPSX {
@@ -84,7 +92,21 @@ impl CollModelPSX {
             binary_section.extend_from_slice(&(*index).to_le_bytes());
         }
 
-        let navmesh_offset = 0xFFFFFFFFu32; // todo
+        // Navmesh
+        while (binary_section.len() % 4) != 0 {
+            binary_section.push(0);
+        }
+        let navmesh_offset = binary_section.len() as u32;
+        for node in &self.navmesh_nodes {
+            binary_section.extend_from_slice(&node.pos_x.to_le_bytes());
+            binary_section.extend_from_slice(&node.pos_y.to_le_bytes());
+            binary_section.extend_from_slice(&node.pos_z.to_le_bytes());
+            binary_section.extend_from_slice(&node.neighbors[0].to_le_bytes());
+            binary_section.extend_from_slice(&node.neighbors[1].to_le_bytes());
+            binary_section.extend_from_slice(&node.neighbors[2].to_le_bytes());
+            binary_section.extend_from_slice(&node.neighbors[3].to_le_bytes());
+        }
+
 
         // Open output file
         let mut file = File::create(output_col).unwrap();
@@ -102,6 +124,8 @@ impl CollModelPSX {
         validate(file.write(&bvh_nodes_offset.to_le_bytes()));
         validate(file.write(&bvh_indices_offset.to_le_bytes()));
         validate(file.write(&navmesh_offset.to_le_bytes()));
+
+        // Write binary section
         validate(file.write(&binary_section.as_slice()));
     }
 }
