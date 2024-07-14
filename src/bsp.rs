@@ -41,7 +41,7 @@ struct BspNodeLeaf {
     polygon_count: u32,
 }
 
-enum BspNode {
+pub enum BspNode {
     Parent(BspNodeParent),
     Leaf(BspNodeLeaf),
 }

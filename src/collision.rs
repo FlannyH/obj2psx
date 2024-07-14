@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use glam::I64Vec3;
 use tobj::LoadOptions;
 
 use crate::psx_structs::{CollModelPSX, CollVertexPSX};
@@ -56,6 +57,280 @@ pub fn obj2col(input_obj: String, output_col: String) {
         }
     }
 
-    let collision_model_psx = CollModelPSX { verts: triangles };
+    let bvh = CollBvh::construct(triangles);
+
+    let collision_model_psx = CollModelPSX { 
+        triangles: bvh.primitives, 
+        nodes: bvh.nodes, 
+        indices: bvh.indices 
+    };
+
     collision_model_psx.save(Path::new(&output_col));
+}
+
+pub struct CollTrianglePSX {
+    pub v0: glam::IVec3,
+    pub v1: glam::IVec3,
+    pub v2: glam::IVec3,
+    pub normal: glam::IVec3,
+
+    // Will be exported separately
+    pub terrain_id: u8,
+}
+
+pub struct Aabb {
+    pub min: glam::IVec3,
+    pub max: glam::IVec3,
+}
+pub struct BvhNode {
+    pub bounds: Aabb, // Axis aligned bounding box around all primitives inside this node
+    pub left_first: u16, // If this is a leaf, this is the index of the first primitive, otherwise, this is the index of the first of two child nodes
+    pub primitive_count: u16, // If this value is above 0x8000, this is a leaf node
+    // todo: it's probably a better idea to make it 0xFFFF if it's a leaf node, as a u16
+}
+
+enum Axis { 
+    X, Y, Z
+}
+
+struct CollBvh {
+    primitives: Vec<CollTrianglePSX>,
+    indices: Vec<u16>,
+    nodes: Vec<BvhNode>,
+
+    // Intermediates, won't get stored in the output file
+    centers: Vec<glam::IVec3>,
+    node_pointer: usize,
+}
+
+const COL_SCALE: i32 = 256;
+
+impl CollBvh {
+    pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
+        dbg!(vertices.len());
+        let mut bvh = CollBvh { 
+            primitives: vec![], 
+            indices: vec![], 
+            nodes: vec![],
+            centers: vec![] ,
+            node_pointer: 0,
+        };
+
+        // Get primitives and their center points
+        for triangle in vertices.chunks_exact(3) {
+            let v0 = glam::IVec3::new(-triangle[0].pos_x as i32 * COL_SCALE, -triangle[0].pos_y as i32 * COL_SCALE, -triangle[0].pos_z as i32 * COL_SCALE);
+            let v1 = glam::IVec3::new(-triangle[1].pos_x as i32 * COL_SCALE, -triangle[1].pos_y as i32 * COL_SCALE, -triangle[1].pos_z as i32 * COL_SCALE);
+            let v2 = glam::IVec3::new(-triangle[2].pos_x as i32 * COL_SCALE, -triangle[2].pos_y as i32 * COL_SCALE, -triangle[2].pos_z as i32 * COL_SCALE);
+
+            // Calculate normal
+            let edge_0_2 = (v2 - v0).as_vec3();
+            let edge_0_1 = (v1 - v0).as_vec3();
+            let normal = edge_0_2.cross(edge_0_1).normalize_or_zero() * glam::Vec3::new(4096.0, 4096.0, 4096.0); // Fixed point 1.0 = 4096;
+
+            // Store in Bvh
+            bvh.primitives.push(CollTrianglePSX { v0, v1, v2, normal: normal.as_ivec3(), terrain_id: 0 }); // todo: unhardcode terrain id
+            bvh.centers.push((v0 + v1 + v2) / glam::IVec3::new(3, 3, 3));
+        }
+
+        // Create index array
+        bvh.indices = (0..bvh.primitives.len() as u16).collect();
+
+        // Create root node
+        bvh.nodes.push(BvhNode { 
+            bounds: Aabb {
+                min: glam::IVec3 { x: 0, y: 0, z: 0 },
+                max: glam::IVec3 { x: 0, y: 0, z: 0 },
+            },
+            left_first: 0,
+            primitive_count: bvh.primitives.len() as u16,
+        });
+
+        // Create empty dummy node so each pair is aligned to a multiple of 2
+        bvh.nodes.push(BvhNode { 
+            bounds: Aabb {
+                min: glam::IVec3 { x: 0, y: 0, z: 0 },
+                max: glam::IVec3 { x: 0, y: 0, z: 0 },
+            },
+            left_first: 0,
+            primitive_count: bvh.primitives.len() as u16,
+        });
+
+        bvh.subdivide(0, 0);
+
+        bvh
+    }
+
+    fn get_bounds(&self, first: u16, count: u16) -> Aabb {
+        let mut result = Aabb {
+            min: glam::IVec3::MAX,
+            max: glam::IVec3::MIN,
+        };
+
+        for i in 0..count {
+            let triangle = &self.primitives[self.indices[(first + i) as usize] as usize];
+            result.max = result.max.max(triangle.v0.max(triangle.v1.max(triangle.v2)));
+            result.min = result.min.min(triangle.v0.min(triangle.v1.min(triangle.v2)));
+        }
+
+        result
+    }
+
+    fn subdivide(&mut self, node_index: usize, recursion_depth: usize) {
+        let leaf_display = || {
+            let debug_display_recursion_depth = true;
+            if debug_display_recursion_depth {
+                print!("{recursion_depth:3}");
+                for i in 0..recursion_depth {
+                    print!("-");
+                }
+                println!("");
+            }
+        };
+
+        // Determine AABB for primitives in array
+        self.nodes[node_index].bounds = self.get_bounds(self.nodes[node_index].left_first, self.nodes[node_index].primitive_count);
+
+        if self.nodes[node_index].primitive_count < 4 {
+            self.nodes[node_index].primitive_count = 0xFFFF;
+            leaf_display();
+            return;
+        }
+
+        // todo: implement surface area heuristic for free performance
+
+        // Get the average position of all the primitives
+        let node = &self.nodes[node_index];
+        let mut avg = glam::I64Vec3::new(0, 0, 0);
+        for i in node.left_first..(node.left_first + node.primitive_count) {
+            avg += self.primitives[self.indices[i as usize] as usize].v0.as_i64vec3();
+            avg += self.primitives[self.indices[i as usize] as usize].v1.as_i64vec3();
+            avg += self.primitives[self.indices[i as usize] as usize].v2.as_i64vec3();
+        }
+        avg /= glam::I64Vec3::new(node.primitive_count as i64 * 3, node.primitive_count as i64 * 3, node.primitive_count as i64 * 3);
+
+        // Determine split axis - choose biggest axis
+        let mut split_axis = Axis::X;
+
+        let size = node.bounds.max - node.bounds.min;
+        let mut split_pos = 0;
+
+        if size.x > size.y && size.x > size.z {
+            split_axis = Axis::X;
+            split_pos = avg.x;
+        }
+
+        if size.y > size.x && size.y > size.z {
+            split_axis = Axis::Y;
+            split_pos = avg.y;
+        }
+
+        if size.z > size.x && size.z > size.y {
+            split_axis = Axis::Z;
+            split_pos = avg.z;
+        }
+
+        // Partition the index array, and get the split position
+        let split_index = {
+            let mut i = node.left_first;
+            for j in (node.left_first)..(node.left_first + node.primitive_count) {
+                // Get min and max of the axis we want
+                let prim = &self.primitives[self.indices[j as usize] as usize];
+                let bounds = Aabb {
+                    min: prim.v0.min(prim.v1.min(prim.v2)),
+                    max: prim.v0.max(prim.v1.max(prim.v2)),
+                };
+
+                // Get center
+                let center = (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
+                let center_point = match split_axis {
+                    Axis::X => center.as_ivec3().x,
+                    Axis::Y => center.as_ivec3().y,
+                    Axis::Z => center.as_ivec3().z,
+                };
+
+                // Swap primitives that are on the wrong sides of the pivot
+                if (center_point > split_pos as i32) && (j != i) {
+                    let temp = self.indices[i as usize];
+                    self.indices[i as usize] = self.indices[j as usize];
+                    self.indices[j as usize] = temp;
+                    i += 1;
+                }
+            }
+            i
+        };
+
+        // If splitIndex is at the end of the array, we've reached a dead end, so stop here
+        if split_index == (node.left_first + node.primitive_count) {
+            self.nodes[node_index].primitive_count = 0xFFFF;
+            leaf_display();
+            return;
+        }
+
+        // If splitIndex and the start are the same, we've reached a dead end, so stop here
+        if split_index == node.left_first {
+            self.nodes[node_index].primitive_count = 0xFFFF;
+            leaf_display();
+            return;
+        }
+
+        // Save the start index of this node
+        let start_index = node.left_first;
+
+        // Create child nodes
+        let primitive_count = node.primitive_count;
+        self.nodes[node_index].left_first = self.nodes.len() as _;
+        
+        // Left
+        self.nodes.push(BvhNode { 
+            bounds: Aabb {
+                max: glam::IVec3::new(0, 0, 0),
+                min: glam::IVec3::new(0, 0, 0),
+            }, 
+            left_first: start_index, 
+            primitive_count: split_index - start_index, 
+        });
+
+        // Right
+        self.nodes.push(BvhNode { 
+            bounds: Aabb {
+                max: glam::IVec3::new(0, 0, 0),
+                min: glam::IVec3::new(0, 0, 0),
+            }, 
+            left_first: split_index, 
+            primitive_count: start_index + primitive_count - split_index, 
+        });
+
+        self.subdivide(self.nodes[node_index].left_first as usize + 0, recursion_depth + 1);
+        self.subdivide(self.nodes[node_index].left_first as usize + 1, recursion_depth + 1);
+    }
+
+    fn partition(primitives: &Vec<CollTrianglePSX>, indices: &mut Vec<u16>, axis: Axis, pivot: i32, start: u16, count: u16, split_index: &mut u16) {
+        let mut i = start;
+        for j in start..(start + count) {
+            // Get min and max of the axis we want
+            let prim = &primitives[indices[j as usize] as usize];
+            let bounds = Aabb {
+                min: prim.v0.min(prim.v1.min(prim.v2)),
+                max: prim.v0.max(prim.v1.max(prim.v2)),
+            };
+
+            // Get center
+            let center = (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
+            let center_point = match axis {
+                Axis::X => center.as_ivec3().x,
+                Axis::Y => center.as_ivec3().y,
+                Axis::Z => center.as_ivec3().z,
+            };
+
+            // Swap primitives that are on the wrong sides of the pivot
+            if (center_point > pivot) && (j != i) {
+                let temp = indices[i as usize];
+                indices[i as usize] = indices[j as usize];
+                indices[j as usize] = temp;
+                i += 1;
+            }
+        }
+
+        *split_index = i;
+    }
 }

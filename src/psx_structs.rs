@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, path::Path};
 
-use crate::helpers::validate;
+use crate::{collision::{BvhNode, CollTrianglePSX}, helpers::validate};
 #[derive(Clone, Copy)]
 pub struct VertexPSX {
     pub pos_x: i16,
@@ -23,26 +23,86 @@ pub struct CollVertexPSX {
 }
 
 pub struct CollModelPSX {
-    pub verts: Vec<CollVertexPSX>,
+    pub triangles: Vec<CollTrianglePSX>,
+    pub nodes: Vec<BvhNode>,
+    pub indices: Vec<u16>,
 }
+
 impl CollModelPSX {
     pub fn save(&self, output_col: &Path) {
+        // Populate binary section and fill in offsets
+        let mut binary_section = Vec::<u8>::new();
+
+        // Triangle data
+        let triangle_data_offset = binary_section.len() as u32;
+        for triangle in &self.triangles {
+            binary_section.extend_from_slice(&triangle.v0.x.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v0.y.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v0.z.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v1.x.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v1.y.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v1.z.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v2.x.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v2.y.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.v2.z.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.normal.x.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.normal.y.to_le_bytes());
+            binary_section.extend_from_slice(&triangle.normal.z.to_le_bytes());
+        }
+
+        // Terrain ID
+        while (binary_section.len() % 4) != 0 {
+            binary_section.push(0);
+        }
+        let terrain_id_offset = binary_section.len() as u32;
+        for triangle in &self.triangles {
+            binary_section.push(triangle.terrain_id);
+        }
+
+        // BVH nodes
+        while (binary_section.len() % 4) != 0 {
+            binary_section.push(0);
+        }
+        let bvh_nodes_offset = binary_section.len() as u32;
+        for node in &self.nodes {
+            binary_section.extend_from_slice(&node.bounds.min.x.to_le_bytes());
+            binary_section.extend_from_slice(&node.bounds.min.y.to_le_bytes());
+            binary_section.extend_from_slice(&node.bounds.min.z.to_le_bytes());
+            binary_section.extend_from_slice(&node.bounds.max.x.to_le_bytes());
+            binary_section.extend_from_slice(&node.bounds.max.y.to_le_bytes());
+            binary_section.extend_from_slice(&node.bounds.max.z.to_le_bytes());
+            binary_section.extend_from_slice(&node.left_first.to_le_bytes());
+            binary_section.extend_from_slice(&node.primitive_count.to_le_bytes());
+        }
+
+        // BVH indices
+        while (binary_section.len() % 4) != 0 {
+            binary_section.push(0);
+        }
+        let bvh_indices_offset = binary_section.len() as u32;
+        for index in &self.indices {
+            binary_section.extend_from_slice(&(*index).to_le_bytes());
+        }
+
+        let navmesh_offset = 0xFFFFFFFFu32; // todo
+
         // Open output file
         let mut file = File::create(output_col).unwrap();
 
         // Write file magic
         validate(file.write("FCOL".as_bytes()));
 
-        // Write number of triangles
-        validate(file.write((self.verts.len() as u32).to_le_bytes().as_slice()));
-
-        // Write triangle data
-        for vert in &self.verts {
-            validate(file.write(vert.pos_x.to_le_bytes().as_slice()));
-            validate(file.write(vert.pos_y.to_le_bytes().as_slice()));
-            validate(file.write(vert.pos_z.to_le_bytes().as_slice()));
-            validate(file.write(vert.terrain_id.to_le_bytes().as_slice()));
-        }
+        // Write header
+        let n_verts = self.triangles.len() as u32 * 3;
+        let n_nodes = self.nodes.len() as u32 * 3;
+        validate(file.write(&n_verts.to_le_bytes()));
+        validate(file.write(&n_nodes.to_le_bytes()));
+        validate(file.write(&triangle_data_offset.to_le_bytes()));
+        validate(file.write(&terrain_id_offset.to_le_bytes()));
+        validate(file.write(&bvh_nodes_offset.to_le_bytes()));
+        validate(file.write(&bvh_indices_offset.to_le_bytes()));
+        validate(file.write(&navmesh_offset.to_le_bytes()));
+        validate(file.write(&binary_section.as_slice()));
     }
 }
 
