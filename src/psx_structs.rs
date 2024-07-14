@@ -221,7 +221,6 @@ impl ModelPSX {
                 z_max,
                 pad: 0,
             });
-            println!("{} verts ({} polygons)", mesh.verts.len(), mesh.n_quads + mesh.n_triangles);
             for vertex in &mesh.verts {
                 raw_vertex_data.push(*vertex);
             }
@@ -327,9 +326,6 @@ impl TextureCollectionPSX {
                 let curr_position = bin_texture_data.len() as u32;
                 let n_bytes_to_add =
                     ((curr_position + (grid_align - 1)) & !(grid_align - 1)) - curr_position;
-
-                println!("curr_position: {curr_position}");
-                println!("n_bytes_to_add: {n_bytes_to_add}");
 
                 // Pad to this align
                 bin_texture_data.resize(bin_texture_data.len() + n_bytes_to_add as usize, 0);

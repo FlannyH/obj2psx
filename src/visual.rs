@@ -24,7 +24,6 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
 
     // Loop over every mesh in the model. We want to combine them all.
     for model in &models {
-        println!("parsing {}", model.name);
         let mut curr_index = 0;
         let mut triangles;
         let mut quads;
@@ -163,7 +162,6 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 n_quads,
                 name: key.clone(),
             });
-            println!("{key}: {n_triangles} triangles and {n_quads} quads processed");
         }
     }
     // 3D grid
@@ -294,7 +292,6 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             // Figure out the best split count - a bit expensive, since we brute force it, but that's fine for lower poly meshes like on PS1
             let mut current_best: Vec<MeshPSX> = Vec::new();
             let mut current_best_error = i64::MAX;
-            let (mut sx, mut sy, mut sz) = (0, 0, 0);
             for splits_x in 1..6 {
                 for splits_y in 1..6 {
                     for splits_z in 1..6 {
@@ -315,16 +312,12 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                             current_best.clear();
                             current_best.extend(meshes_to_add);
                             current_best_error = error;
-                            sx = splits_x;
-                            sy = splits_y;
-                            sz = splits_z;
                         }
                     }
                 }
             }
 
             model_psx.meshes.extend(current_best);
-            dbg!(name, model_psx.meshes.len(), (sx, sy, sz));
         }
     }
 
@@ -342,7 +335,6 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 let parent_directory = input_path.parent().expect("Invalid file path");
                 let combined_path = parent_directory.join(material.diffuse_texture.unwrap());
                 name = String::from(combined_path.to_str().unwrap());
-                println!("converting texture {}", name);
                 let raw_image = match stb_image::image::load(&name) {
                     stb_image::image::LoadResult::ImageU8(image) => Some(image),
                     _ => None,
@@ -444,7 +436,6 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             }
 
             // Convert indices to 4 bit
-            println!("{:?}", indexed_data.len());
             if using_texture_page {
                 for i in 0..(width * height) {
                     if i < indexed_data.len() {
@@ -572,11 +563,6 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
                 })
             }
         }
-    }
-    let input_vertices = mesh.quads.len() + mesh.triangles.len();
-    let mut output_vertices = 0;
-    for mesh in &mut *meshes_to_add {
-        output_vertices += mesh.verts.len();
     }
 }
 

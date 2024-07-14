@@ -19,7 +19,6 @@ pub fn obj2col(input_obj: String, output_col: String) {
 
     // Loop over every mesh in the model. We want to combine them all.
     for model in &models {
-        println!("parsing {}", model.name);
         let mut curr_index = 0;
 
         let face_arities = match model.mesh.face_arities.is_empty() {
@@ -176,7 +175,7 @@ impl CollBvh {
 
     fn subdivide(&mut self, node_index: usize, recursion_depth: usize) {
         let leaf_display = || {
-            let debug_display_recursion_depth = true;
+            let debug_display_recursion_depth = false;
             if debug_display_recursion_depth {
                 print!("{recursion_depth:3}");
                 for _ in 0..recursion_depth {

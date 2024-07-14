@@ -41,7 +41,7 @@ struct BspNodeLeaf {
     polygon_count: u32,
 }
 
-pub enum BspNode {
+enum BspNode {
     Parent(BspNodeParent),
     Leaf(BspNodeLeaf),
 }
@@ -161,7 +161,7 @@ fn subdivide(
     poly_limit: u32,
     mesh_output: &mut Vec<MeshGridEntry>,
 ) {
-    let mut node = match &mut bsp.nodes[node_index as usize] {
+    let node = match &mut bsp.nodes[node_index as usize] {
         BspNode::Parent(n) => n,
         BspNode::Leaf(_) => unreachable!(), // If it's a leaf, we don't add it to the queue, so this never happens
     };
@@ -186,14 +186,9 @@ fn subdivide(
     let start2 = split_index;
     let count1 = split_index - start1;
     let count2 = node.index_first_polygon + node.polygon_count - split_index;
-    // for _ in 0..rec_depth {
-    //     print!("  ");
-    // }
-    // println!("[{count1}, {count2}]");
 
     // If this node reached below the polygon limit, or one of the split plane counts was 0
     if (node.polygon_count < poly_limit) || (count1 == 0) || (count2 == 0) {
-        println!("leaf node reached ({} polygons)", node.polygon_count);
         let start = node.index_first_polygon;
         let end = start + node.polygon_count;
 
