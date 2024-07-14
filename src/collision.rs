@@ -105,7 +105,6 @@ const COL_SCALE: i32 = -512;
 
 impl CollBvh {
     pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
-        dbg!(vertices.len());
         let mut bvh = CollBvh { 
             primitives: vec![], 
             indices: vec![], 
