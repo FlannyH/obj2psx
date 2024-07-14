@@ -85,8 +85,7 @@ pub struct Aabb {
 pub struct BvhNode {
     pub bounds: Aabb, // Axis aligned bounding box around all primitives inside this node
     pub left_first: u16, // If this is a leaf, this is the index of the first primitive, otherwise, this is the index of the first of two child nodes
-    pub primitive_count: u16, // If this value is above 0x8000, this is a leaf node
-    // todo: it's probably a better idea to make it 0xFFFF if it's a leaf node, as a u16
+    pub primitive_count: u16, // If this value is not 0, this is a leaf node
 }
 
 enum Axis { 
@@ -103,7 +102,7 @@ struct CollBvh {
     node_pointer: usize,
 }
 
-const COL_SCALE: i32 = 256;
+const COL_SCALE: i32 = -512;
 
 impl CollBvh {
     pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
@@ -118,14 +117,14 @@ impl CollBvh {
 
         // Get primitives and their center points
         for triangle in vertices.chunks_exact(3) {
-            let v0 = glam::IVec3::new(-triangle[0].pos_x as i32 * COL_SCALE, -triangle[0].pos_y as i32 * COL_SCALE, -triangle[0].pos_z as i32 * COL_SCALE);
-            let v1 = glam::IVec3::new(-triangle[1].pos_x as i32 * COL_SCALE, -triangle[1].pos_y as i32 * COL_SCALE, -triangle[1].pos_z as i32 * COL_SCALE);
-            let v2 = glam::IVec3::new(-triangle[2].pos_x as i32 * COL_SCALE, -triangle[2].pos_y as i32 * COL_SCALE, -triangle[2].pos_z as i32 * COL_SCALE);
+            let v0 = glam::IVec3::new(triangle[0].pos_x as i32 * COL_SCALE, triangle[0].pos_y as i32 * COL_SCALE, triangle[0].pos_z as i32 * COL_SCALE);
+            let v1 = glam::IVec3::new(triangle[1].pos_x as i32 * COL_SCALE, triangle[1].pos_y as i32 * COL_SCALE, triangle[1].pos_z as i32 * COL_SCALE);
+            let v2 = glam::IVec3::new(triangle[2].pos_x as i32 * COL_SCALE, triangle[2].pos_y as i32 * COL_SCALE, triangle[2].pos_z as i32 * COL_SCALE);
 
             // Calculate normal
             let edge_0_2 = (v2 - v0).as_vec3();
             let edge_0_1 = (v1 - v0).as_vec3();
-            let normal = edge_0_2.cross(edge_0_1).normalize_or_zero() * glam::Vec3::new(4096.0, 4096.0, 4096.0); // Fixed point 1.0 = 4096;
+            let normal = edge_0_2.cross(edge_0_1).normalize_or_zero() * glam::Vec3::new(-4096.0, -4096.0, -4096.0); // Fixed point 1.0 = 4096;
 
             // Store in Bvh
             bvh.primitives.push(CollTrianglePSX { v0, v1, v2, normal: normal.as_ivec3(), terrain_id: 0 }); // todo: unhardcode terrain id
@@ -180,7 +179,7 @@ impl CollBvh {
             let debug_display_recursion_depth = true;
             if debug_display_recursion_depth {
                 print!("{recursion_depth:3}");
-                for i in 0..recursion_depth {
+                for _ in 0..recursion_depth {
                     print!("-");
                 }
                 println!("");
@@ -190,8 +189,7 @@ impl CollBvh {
         // Determine AABB for primitives in array
         self.nodes[node_index].bounds = self.get_bounds(self.nodes[node_index].left_first, self.nodes[node_index].primitive_count);
 
-        if self.nodes[node_index].primitive_count < 4 {
-            self.nodes[node_index].primitive_count = 0xFFFF;
+        if self.nodes[node_index].primitive_count < 3 {
             leaf_display();
             return;
         }
@@ -210,9 +208,9 @@ impl CollBvh {
 
         // Determine split axis - choose biggest axis
         let mut split_axis = Axis::X;
+        let mut split_pos = 0;
 
         let size = node.bounds.max - node.bounds.min;
-        let mut split_pos = 0;
 
         if size.x > size.y && size.x > size.z {
             split_axis = Axis::X;
@@ -261,14 +259,12 @@ impl CollBvh {
 
         // If splitIndex is at the end of the array, we've reached a dead end, so stop here
         if split_index == (node.left_first + node.primitive_count) {
-            self.nodes[node_index].primitive_count = 0xFFFF;
             leaf_display();
             return;
         }
 
         // If splitIndex and the start are the same, we've reached a dead end, so stop here
         if split_index == node.left_first {
-            self.nodes[node_index].primitive_count = 0xFFFF;
             leaf_display();
             return;
         }
@@ -302,6 +298,8 @@ impl CollBvh {
 
         self.subdivide(self.nodes[node_index].left_first as usize + 0, recursion_depth + 1);
         self.subdivide(self.nodes[node_index].left_first as usize + 1, recursion_depth + 1);
+
+        self.nodes[node_index].primitive_count = 0;
     }
 
     fn partition(primitives: &Vec<CollTrianglePSX>, indices: &mut Vec<u16>, axis: Axis, pivot: i32, start: u16, count: u16, split_index: &mut u16) {
