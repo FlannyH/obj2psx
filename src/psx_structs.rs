@@ -1,6 +1,9 @@
 use std::{fs::File, io::Write, path::Path};
 
-use crate::{collision::{BvhNode, CollTrianglePSX}, helpers::validate};
+use crate::{
+    collision::{BvhNode, CollTrianglePSX},
+    helpers::validate,
+};
 #[derive(Clone, Copy)]
 pub struct VertexPSX {
     pub pos_x: i16,
@@ -22,18 +25,18 @@ pub struct CollVertexPSX {
     pub terrain_id: u16,
 }
 
-pub struct NavMeshNode {
+pub struct NavGraphNode {
     pub pos_x: i16,
     pub pos_y: i16,
     pub pos_z: i16,
-    pub neighbors: [u16; 4]
+    pub neighbors: [u16; 4],
 }
 
 pub struct CollModelPSX {
     pub triangles: Vec<CollTrianglePSX>,
     pub nodes: Vec<BvhNode>,
     pub indices: Vec<u16>,
-    pub navmesh_nodes: Vec<NavMeshNode>,
+    pub nav_graph_nodes: Vec<NavGraphNode>,
 }
 
 impl CollModelPSX {
@@ -92,12 +95,12 @@ impl CollModelPSX {
             binary_section.extend_from_slice(&(*index).to_le_bytes());
         }
 
-        // Navmesh
+        // Navigation graph
         while (binary_section.len() % 4) != 0 {
             binary_section.push(0);
         }
-        let navmesh_offset = binary_section.len() as u32;
-        for node in &self.navmesh_nodes {
+        let nav_graph_offset = binary_section.len() as u32;
+        for node in &self.nav_graph_nodes {
             binary_section.extend_from_slice(&node.pos_x.to_le_bytes());
             binary_section.extend_from_slice(&node.pos_y.to_le_bytes());
             binary_section.extend_from_slice(&node.pos_z.to_le_bytes());
@@ -106,7 +109,6 @@ impl CollModelPSX {
             binary_section.extend_from_slice(&node.neighbors[2].to_le_bytes());
             binary_section.extend_from_slice(&node.neighbors[3].to_le_bytes());
         }
-
 
         // Open output file
         let mut file = File::create(output_col).unwrap();
@@ -123,7 +125,7 @@ impl CollModelPSX {
         validate(file.write(&terrain_id_offset.to_le_bytes()));
         validate(file.write(&bvh_nodes_offset.to_le_bytes()));
         validate(file.write(&bvh_indices_offset.to_le_bytes()));
-        validate(file.write(&navmesh_offset.to_le_bytes()));
+        validate(file.write(&nav_graph_offset.to_le_bytes()));
 
         // Write binary section
         validate(file.write(&binary_section.as_slice()));

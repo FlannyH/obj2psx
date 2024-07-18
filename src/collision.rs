@@ -3,7 +3,7 @@ use std::path::Path;
 use glam::I64Vec3;
 use tobj::LoadOptions;
 
-use crate::psx_structs::{CollModelPSX, CollVertexPSX, NavMeshNode};
+use crate::psx_structs::{CollModelPSX, CollVertexPSX, NavGraphNode};
 
 pub fn obj2col(input_obj: String, output_col: String) {
     let (models, _materials) = tobj::load_obj(
@@ -58,17 +58,17 @@ pub fn obj2col(input_obj: String, output_col: String) {
 
     let bvh = CollBvh::construct(triangles);
 
-    let mut navmesh_nodes = Vec::<NavMeshNode>::new();
+    let mut nav_graph_nodes = Vec::<NavGraphNode>::new();
     for (center, primitive) in bvh.centers.iter().zip(&bvh.primitives) {
         if primitive.normal.y < 2048 {
             continue;
         }
-        
+
         let center_x16 = (center.x / 4096) as i16;
         let center_y16 = (center.y / 4096) as i16;
         let center_z16 = (center.z / 4096) as i16;
-        
-        navmesh_nodes.push(NavMeshNode {
+
+        nav_graph_nodes.push(NavGraphNode {
             pos_x: center_x16,
             pos_y: center_y16,
             pos_z: center_z16,
@@ -77,15 +77,16 @@ pub fn obj2col(input_obj: String, output_col: String) {
     }
 
     // Naive approach to finding neighbors (closest cells)
-    for node1_index in 0..navmesh_nodes.len() {
+    for node1_index in 0..nav_graph_nodes.len() {
         // Add to circular buffer any time the value is lower than the last
-        let mut closest_distances = vec![f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
+        let mut closest_distances =
+            vec![f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
         let mut closest_indices = vec![0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]; // Initialize to invalid value 0xFFFF, so we know when to end early if there's less neighbors
         let mut circular_buffer_index = 0;
 
-        for node2_index in 0..navmesh_nodes.len() {
-            let node1 = &navmesh_nodes[node1_index];
-            let node2 = &navmesh_nodes[node2_index];
+        for node2_index in 0..nav_graph_nodes.len() {
+            let node1 = &nav_graph_nodes[node1_index];
+            let node2 = &nav_graph_nodes[node2_index];
             let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32, node1.pos_z as f32);
             let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32, node2.pos_z as f32);
             let distance = a.distance(b);
@@ -98,15 +99,15 @@ pub fn obj2col(input_obj: String, output_col: String) {
         }
 
         for i in 0..4 {
-            navmesh_nodes[node1_index].neighbors[i] = closest_indices[i] as u16;
+            nav_graph_nodes[node1_index].neighbors[i] = closest_indices[i] as u16;
         }
     }
 
-    let collision_model_psx = CollModelPSX { 
-        triangles: bvh.primitives, 
-        nodes: bvh.nodes, 
+    let collision_model_psx = CollModelPSX {
+        triangles: bvh.primitives,
+        nodes: bvh.nodes,
         indices: bvh.indices,
-        navmesh_nodes, 
+        nav_graph_nodes,
     };
 
     collision_model_psx.save(Path::new(&output_col));
@@ -132,8 +133,10 @@ pub struct BvhNode {
     pub primitive_count: u16, // If this value is not 0, this is a leaf node
 }
 
-enum Axis { 
-    X, Y, Z
+enum Axis {
+    X,
+    Y,
+    Z,
 }
 
 struct CollBvh {
@@ -150,27 +153,46 @@ const COL_SCALE: i32 = 512;
 
 impl CollBvh {
     pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
-        let mut bvh = CollBvh { 
-            primitives: vec![], 
-            indices: vec![], 
+        let mut bvh = CollBvh {
+            primitives: vec![],
+            indices: vec![],
             nodes: vec![],
-            centers: vec![] ,
+            centers: vec![],
             node_pointer: 0,
         };
 
         // Get primitives and their center points
         for triangle in vertices.chunks_exact(3) {
-            let v0 = glam::IVec3::new(triangle[0].pos_x as i32 * -COL_SCALE, triangle[0].pos_y as i32 * -COL_SCALE, triangle[0].pos_z as i32 * -COL_SCALE);
-            let v1 = glam::IVec3::new(triangle[1].pos_x as i32 * -COL_SCALE, triangle[1].pos_y as i32 * -COL_SCALE, triangle[1].pos_z as i32 * -COL_SCALE);
-            let v2 = glam::IVec3::new(triangle[2].pos_x as i32 * -COL_SCALE, triangle[2].pos_y as i32 * -COL_SCALE, triangle[2].pos_z as i32 * -COL_SCALE);
+            let v0 = glam::IVec3::new(
+                triangle[0].pos_x as i32 * -COL_SCALE,
+                triangle[0].pos_y as i32 * -COL_SCALE,
+                triangle[0].pos_z as i32 * -COL_SCALE,
+            );
+            let v1 = glam::IVec3::new(
+                triangle[1].pos_x as i32 * -COL_SCALE,
+                triangle[1].pos_y as i32 * -COL_SCALE,
+                triangle[1].pos_z as i32 * -COL_SCALE,
+            );
+            let v2 = glam::IVec3::new(
+                triangle[2].pos_x as i32 * -COL_SCALE,
+                triangle[2].pos_y as i32 * -COL_SCALE,
+                triangle[2].pos_z as i32 * -COL_SCALE,
+            );
 
             // Calculate normal
             let edge_0_2 = (v2 - v0).as_vec3();
             let edge_0_1 = (v1 - v0).as_vec3();
-            let normal = edge_0_2.cross(edge_0_1).normalize_or_zero() * glam::Vec3::new(-4096.0, -4096.0, -4096.0); // Fixed point 1.0 = 4096;
+            let normal = edge_0_2.cross(edge_0_1).normalize_or_zero()
+                * glam::Vec3::new(-4096.0, -4096.0, -4096.0); // Fixed point 1.0 = 4096;
 
             // Store in Bvh
-            bvh.primitives.push(CollTrianglePSX { v0, v1, v2, normal: normal.as_ivec3(), terrain_id: 0 }); // todo: unhardcode terrain id
+            bvh.primitives.push(CollTrianglePSX {
+                v0,
+                v1,
+                v2,
+                normal: normal.as_ivec3(),
+                terrain_id: 0,
+            }); // todo: unhardcode terrain id
             bvh.centers.push((v0 + v1 + v2) / glam::IVec3::new(3, 3, 3));
         }
 
@@ -178,7 +200,7 @@ impl CollBvh {
         bvh.indices = (0..bvh.primitives.len() as u16).collect();
 
         // Create root node
-        bvh.nodes.push(BvhNode { 
+        bvh.nodes.push(BvhNode {
             bounds: Aabb {
                 min: glam::IVec3 { x: 0, y: 0, z: 0 },
                 max: glam::IVec3 { x: 0, y: 0, z: 0 },
@@ -188,7 +210,7 @@ impl CollBvh {
         });
 
         // Create empty dummy node so each pair is aligned to a multiple of 2
-        bvh.nodes.push(BvhNode { 
+        bvh.nodes.push(BvhNode {
             bounds: Aabb {
                 min: glam::IVec3 { x: 0, y: 0, z: 0 },
                 max: glam::IVec3 { x: 0, y: 0, z: 0 },
@@ -210,8 +232,12 @@ impl CollBvh {
 
         for i in 0..count {
             let triangle = &self.primitives[self.indices[(first + i) as usize] as usize];
-            result.max = result.max.max(triangle.v0.max(triangle.v1.max(triangle.v2)));
-            result.min = result.min.min(triangle.v0.min(triangle.v1.min(triangle.v2)));
+            result.max = result
+                .max
+                .max(triangle.v0.max(triangle.v1.max(triangle.v2)));
+            result.min = result
+                .min
+                .min(triangle.v0.min(triangle.v1.min(triangle.v2)));
         }
 
         result
@@ -230,7 +256,10 @@ impl CollBvh {
         };
 
         // Determine AABB for primitives in array
-        self.nodes[node_index].bounds = self.get_bounds(self.nodes[node_index].left_first, self.nodes[node_index].primitive_count);
+        self.nodes[node_index].bounds = self.get_bounds(
+            self.nodes[node_index].left_first,
+            self.nodes[node_index].primitive_count,
+        );
 
         if self.nodes[node_index].primitive_count < 3 {
             leaf_display();
@@ -243,11 +272,21 @@ impl CollBvh {
         let node = &self.nodes[node_index];
         let mut avg = glam::I64Vec3::new(0, 0, 0);
         for i in node.left_first..(node.left_first + node.primitive_count) {
-            avg += self.primitives[self.indices[i as usize] as usize].v0.as_i64vec3();
-            avg += self.primitives[self.indices[i as usize] as usize].v1.as_i64vec3();
-            avg += self.primitives[self.indices[i as usize] as usize].v2.as_i64vec3();
+            avg += self.primitives[self.indices[i as usize] as usize]
+                .v0
+                .as_i64vec3();
+            avg += self.primitives[self.indices[i as usize] as usize]
+                .v1
+                .as_i64vec3();
+            avg += self.primitives[self.indices[i as usize] as usize]
+                .v2
+                .as_i64vec3();
         }
-        avg /= glam::I64Vec3::new(node.primitive_count as i64 * 3, node.primitive_count as i64 * 3, node.primitive_count as i64 * 3);
+        avg /= glam::I64Vec3::new(
+            node.primitive_count as i64 * 3,
+            node.primitive_count as i64 * 3,
+            node.primitive_count as i64 * 3,
+        );
 
         // Determine split axis - choose biggest axis
         let mut split_axis = Axis::X;
@@ -282,7 +321,8 @@ impl CollBvh {
                 };
 
                 // Get center
-                let center = (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
+                let center =
+                    (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
                 let center_point = match split_axis {
                     Axis::X => center.as_ivec3().x,
                     Axis::Y => center.as_ivec3().y,
@@ -318,34 +358,48 @@ impl CollBvh {
         // Create child nodes
         let primitive_count = node.primitive_count;
         self.nodes[node_index].left_first = self.nodes.len() as _;
-        
+
         // Left
-        self.nodes.push(BvhNode { 
+        self.nodes.push(BvhNode {
             bounds: Aabb {
                 max: glam::IVec3::new(0, 0, 0),
                 min: glam::IVec3::new(0, 0, 0),
-            }, 
-            left_first: start_index, 
-            primitive_count: split_index - start_index, 
+            },
+            left_first: start_index,
+            primitive_count: split_index - start_index,
         });
 
         // Right
-        self.nodes.push(BvhNode { 
+        self.nodes.push(BvhNode {
             bounds: Aabb {
                 max: glam::IVec3::new(0, 0, 0),
                 min: glam::IVec3::new(0, 0, 0),
-            }, 
-            left_first: split_index, 
-            primitive_count: start_index + primitive_count - split_index, 
+            },
+            left_first: split_index,
+            primitive_count: start_index + primitive_count - split_index,
         });
 
-        self.subdivide(self.nodes[node_index].left_first as usize + 0, recursion_depth + 1);
-        self.subdivide(self.nodes[node_index].left_first as usize + 1, recursion_depth + 1);
+        self.subdivide(
+            self.nodes[node_index].left_first as usize + 0,
+            recursion_depth + 1,
+        );
+        self.subdivide(
+            self.nodes[node_index].left_first as usize + 1,
+            recursion_depth + 1,
+        );
 
         self.nodes[node_index].primitive_count = 0;
     }
 
-    fn partition(primitives: &Vec<CollTrianglePSX>, indices: &mut Vec<u16>, axis: Axis, pivot: i32, start: u16, count: u16, split_index: &mut u16) {
+    fn partition(
+        primitives: &Vec<CollTrianglePSX>,
+        indices: &mut Vec<u16>,
+        axis: Axis,
+        pivot: i32,
+        start: u16,
+        count: u16,
+        split_index: &mut u16,
+    ) {
         let mut i = start;
         for j in start..(start + count) {
             // Get min and max of the axis we want
@@ -356,7 +410,8 @@ impl CollBvh {
             };
 
             // Get center
-            let center = (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
+            let center =
+                (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
             let center_point = match axis {
                 Axis::X => center.as_ivec3().x,
                 Axis::Y => center.as_ivec3().y,
