@@ -99,7 +99,9 @@ impl CollModelPSX {
         while (binary_section.len() % 4) != 0 {
             binary_section.push(0);
         }
-        let nav_graph_offset = binary_section.len() as u32;
+        let nav_graph_offset = binary_section.len() as u16; // as long as the node struct won't contain any 4-byte aligned things we're good
+
+        binary_section.extend_from_slice(&(self.nav_graph_nodes.len() as u32).to_le_bytes());
         for node in &self.nav_graph_nodes {
             binary_section.extend_from_slice(&node.pos_x.to_le_bytes());
             binary_section.extend_from_slice(&node.pos_y.to_le_bytes());
