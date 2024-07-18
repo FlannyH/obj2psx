@@ -78,7 +78,7 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> V
                         z: tri[2].pos_z as f32,
                     },
                 },
-                &tri,
+                tri,
             ));
             i += 3;
         }
@@ -107,7 +107,7 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> V
                         z: quad[3].pos_z as f32,
                     },
                 },
-                &quad,
+                quad,
             ));
             i += 4;
         }
@@ -134,23 +134,18 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> V
 
     let mut meshes = Vec::<MeshGridEntry>::new();
 
-    loop {
-        match node_queue.pop() {
-            Some((node_index, rec_depth)) => {
-                subdivide(
-                    &mut bsp_tree,
-                    node_index,
-                    rec_depth,
-                    &mut node_queue,
-                    poly_limit,
-                    &mut meshes,
-                );
-            }
-            None => break,
-        }
+    while let Some((node_index, rec_depth)) = node_queue.pop() {
+        subdivide(
+            &mut bsp_tree,
+            node_index,
+            rec_depth,
+            &mut node_queue,
+            poly_limit,
+            &mut meshes,
+        );
     }
 
-    return meshes;
+    meshes
 }
 
 fn subdivide(
@@ -238,8 +233,8 @@ fn subdivide(
 
 // Returns split index
 fn partition(
-    indices: &mut Vec<u32>,
-    polygons: &Vec<Polygon>,
+    indices: &mut [u32],
+    polygons: &[Polygon],
     split_plane: Plane,
     start: u32,
     count: u32,
@@ -262,18 +257,17 @@ fn partition(
         }
     }
 
-    return i;
+    i
 }
 
 // Takes a bunch of polygons and returns a split plane
-fn find_split_plane(polygons: &Vec<Polygon>, indices: &Vec<u32>, start: u32, count: u32) -> Plane {
-
+fn find_split_plane(polygons: &[Polygon], indices: &[u32], start: u32, count: u32) -> Plane {
     // Find center of all polygons
     let mut center = Vec3::ZERO;
     for i in start..(start + count) {
         let polygon = polygons[indices[i as usize] as usize];
         center += match polygon {
-            Polygon::Triangle( _, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
+            Polygon::Triangle(_, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
             Polygon::Quad(_, quad, _) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
         }
     }
@@ -287,7 +281,7 @@ fn find_split_plane(polygons: &Vec<Polygon>, indices: &Vec<u32>, start: u32, cou
     for i in start..(start + count) {
         let polygon = polygons[indices[i as usize] as usize];
         let curr_center = match polygon {
-            Polygon::Triangle( _, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
+            Polygon::Triangle(_, tri, _) => (tri.v0 + tri.v1 + tri.v2) / 3.0,
             Polygon::Quad(_, quad, _) => (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 3.0,
         };
         let distance = curr_center.distance(center);
@@ -302,8 +296,8 @@ fn find_split_plane(polygons: &Vec<Polygon>, indices: &Vec<u32>, start: u32, cou
     }
 
     // Create plane from that
-    return Plane {
+    Plane {
         position: closest_polygon_center,
-        normal: (furthest_polygon_center - closest_polygon_center).normalize(),        
+        normal: (furthest_polygon_center - closest_polygon_center).normalize(),
     }
 }

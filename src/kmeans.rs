@@ -3,9 +3,15 @@ use std::collections::HashMap;
 use glam::Vec3;
 use rand::Rng;
 
-use crate::{MeshGridEntry, bsp::{Polygon, Triangle, Quad}};
+use crate::{
+    bsp::{Polygon, Quad, Triangle},
+    MeshGridEntry,
+};
 
-pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> Vec<MeshGridEntry> {
+pub fn kmeans_cluster(
+    mesh_map: HashMap<String, MeshGridEntry>,
+    poly_limit: u32,
+) -> Vec<MeshGridEntry> {
     let mut polygons = Vec::<Polygon>::new();
 
     // Get all polygons in one big buffer
@@ -31,7 +37,7 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
                         z: tri[2].pos_z as f32,
                     },
                 },
-                &tri,
+                tri,
             ));
             i += 3;
         }
@@ -60,11 +66,11 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
                         z: quad[3].pos_z as f32,
                     },
                 },
-                &quad,
+                quad,
             ));
             i += 4;
         }
-    };
+    }
 
     // How many clusters do we want?
     let n_clusters = polygons.len() / poly_limit as usize;
@@ -84,7 +90,7 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
 
     loop {
         let mut change = false;
-        
+
         // Assign polygons to clusters
         for polygon in &mut polygons {
             let mut min_distance = f32::INFINITY;
@@ -107,7 +113,7 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
                     }
                 }
             }
-            
+
             let index_after = *match polygon {
                 Polygon::Triangle(index, _, _) => index,
                 Polygon::Quad(index, _, _) => index,
@@ -124,7 +130,9 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
             let mut acc_num = 0;
             for polygon in &polygons {
                 let (index, center) = match polygon {
-                    Polygon::Quad(index, quad, _) => (index, (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 4.0),
+                    Polygon::Quad(index, quad, _) => {
+                        (index, (quad.v0 + quad.v1 + quad.v2 + quad.v3) / 4.0)
+                    }
                     Polygon::Triangle(index, tri, _) => (index, (tri.v0 + tri.v1 + tri.v2) / 3.0),
                 };
                 if i == *index as usize {
@@ -152,8 +160,16 @@ pub fn kmeans_cluster(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32)
         // Collect all polygons in this cluster
         for polygon in &polygons {
             match polygon {
-                Polygon::Triangle(index, _, verts) => if *index == i as u32 {mesh.triangles.extend_from_slice(verts)},
-                Polygon::Quad(index, _, verts) => if *index == i as u32 {mesh.quads.extend_from_slice(verts)},
+                Polygon::Triangle(index, _, verts) => {
+                    if *index == i as u32 {
+                        mesh.triangles.extend_from_slice(verts)
+                    }
+                }
+                Polygon::Quad(index, _, verts) => {
+                    if *index == i as u32 {
+                        mesh.quads.extend_from_slice(verts)
+                    }
+                }
             }
         }
 

@@ -128,7 +128,7 @@ impl CollModelPSX {
         validate(file.write(&nav_graph_offset.to_le_bytes()));
 
         // Write binary section
-        validate(file.write(&binary_section.as_slice()));
+        validate(file.write(binary_section.as_slice()));
     }
 }
 

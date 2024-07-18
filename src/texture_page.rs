@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use exoquant::{convert_to_indexed, optimizer, ditherer};
+use exoquant::{convert_to_indexed, ditherer, optimizer};
 
-use crate::psx_structs::{TextureCollectionPSX, TextureCellPSX};
+use crate::psx_structs::{TextureCellPSX, TextureCollectionPSX};
 
 pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
     // Open the image
@@ -15,15 +15,15 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
     if image.height > 256 || image.width > 256 {
         eprintln!("Image can not be bigger than 256x256")
     }
-    
+
     // Quantize it to 16 colours
     let mut tex_data_exoquant = Vec::new();
     for pixel in image.data.chunks(image.depth) {
         match image.depth {
-            4 => tex_data_exoquant
-                .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], pixel[3])),
-            3 => tex_data_exoquant
-                .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255)),
+            4 => {
+                tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], pixel[3]))
+            }
+            3 => tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255)),
             _ => panic!(),
         }
     }
@@ -40,12 +40,11 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
     for color in palette {
         if color.a > 0 {
             tex_palette.push(
-                (color.r as u16 & 0b11111000) >> 3 |
-                (color.g as u16 & 0b11111000) << 2 | 
-                (color.b as u16 & 0b11111000) << 7
+                (color.r as u16 & 0b11111000) >> 3
+                    | (color.g as u16 & 0b11111000) << 2
+                    | (color.b as u16 & 0b11111000) << 7,
             );
-        }
-        else {
+        } else {
             tex_palette.push(0);
         }
     }
@@ -55,13 +54,15 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
     }
 
     let mut txc_psx = TextureCollectionPSX::new();
-    txc_psx.texture_names.push(String::from(input.file_name().unwrap().to_string_lossy()));
-    txc_psx.texture_cells.push(TextureCellPSX{
+    txc_psx
+        .texture_names
+        .push(String::from(input.file_name().unwrap().to_string_lossy()));
+    txc_psx.texture_cells.push(TextureCellPSX {
         texture_data: indexed_data,
         palette: tex_palette,
         texture_width: (image.width % 256) as u8,
         texture_height: (image.height % 256) as u8,
         avg_color: 0,
     });
-    return txc_psx;
+    txc_psx
 }

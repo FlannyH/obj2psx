@@ -308,7 +308,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                         }
 
                         // Is it better than before? Store the result
-                        if error < current_best_error && meshes_to_add.len() != 0 {
+                        if error < current_best_error && !meshes_to_add.is_empty() {
                             current_best.clear();
                             current_best.extend(meshes_to_add);
                             current_best_error = error;
@@ -547,7 +547,7 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
                 }
             
                 // Filter out empty meshes
-                if tris.len() == 0 && quads.len() == 0 {
+                if tris.is_empty() && quads.is_empty() {
                     continue;
                 }
 

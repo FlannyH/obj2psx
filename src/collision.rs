@@ -79,9 +79,8 @@ pub fn obj2col(input_obj: String, output_col: String) {
     // Naive approach to finding neighbors (closest cells)
     for node1_index in 0..nav_graph_nodes.len() {
         // Add to circular buffer any time the value is lower than the last
-        let mut closest_distances =
-            vec![f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
-        let mut closest_indices = vec![0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]; // Initialize to invalid value 0xFFFF, so we know when to end early if there's less neighbors
+        let mut closest_distances = [f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
+        let mut closest_indices = [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]; // Initialize to invalid value 0xFFFF, so we know when to end early if there's less neighbors
         let mut circular_buffer_index = 0;
 
         for node2_index in 0..nav_graph_nodes.len() {
@@ -98,8 +97,8 @@ pub fn obj2col(input_obj: String, output_col: String) {
             }
         }
 
-        for i in 0..4 {
-            nav_graph_nodes[node1_index].neighbors[i] = closest_indices[i] as u16;
+        for (i, closest_index) in closest_indices.iter().enumerate() {
+            nav_graph_nodes[node1_index].neighbors[i] = *closest_index as u16;
         }
     }
 
@@ -251,7 +250,7 @@ impl CollBvh {
                 for _ in 0..recursion_depth {
                     print!("-");
                 }
-                println!("");
+                print!(" ");
             }
         };
 
@@ -331,9 +330,7 @@ impl CollBvh {
 
                 // Swap primitives that are on the wrong sides of the pivot
                 if (center_point > split_pos as i32) && (j != i) {
-                    let temp = self.indices[i as usize];
-                    self.indices[i as usize] = self.indices[j as usize];
-                    self.indices[j as usize] = temp;
+                    self.indices.swap(i as usize, j as usize);
                     i += 1;
                 }
             }
@@ -392,8 +389,8 @@ impl CollBvh {
     }
 
     fn partition(
-        primitives: &Vec<CollTrianglePSX>,
-        indices: &mut Vec<u16>,
+        primitives: &[CollTrianglePSX],
+        indices: &mut [u16],
         axis: Axis,
         pivot: i32,
         start: u16,
@@ -420,9 +417,7 @@ impl CollBvh {
 
             // Swap primitives that are on the wrong sides of the pivot
             if (center_point > pivot) && (j != i) {
-                let temp = indices[i as usize];
-                indices[i as usize] = indices[j as usize];
-                indices[j as usize] = temp;
+                indices.swap(i as usize, j as usize);
                 i += 1;
             }
         }
