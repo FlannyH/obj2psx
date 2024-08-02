@@ -1,14 +1,26 @@
 use std::{collections::HashMap, path::Path};
 
-use exoquant::{convert_to_indexed, ditherer, optimizer, Color};
+use exoquant::{
+    generate_palette,
+    optimizer::{self, Optimizer},
+    Color, SimpleColorSpace,
+};
 use tobj::LoadOptions;
 
 use crate::{
+    bsp::split_bsp,
+    kmeans::kmeans_cluster,
     psx_structs::{MeshPSX, ModelPSX, TextureCellPSX, TextureCollectionPSX, VertexPSX},
-    MeshGridEntry, bsp::split_bsp, kmeans::kmeans_cluster,
+    MeshGridEntry,
 };
 
-pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, using_texture_page: bool, split: bool) {
+pub fn obj2msh_txc(
+    input_obj: String,
+    output_msh: String,
+    output_txc: String,
+    using_texture_page: bool,
+    split: bool,
+) {
     let (models, materials) = tobj::load_obj(
         &input_obj,
         &LoadOptions {
@@ -49,7 +61,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                 let (h, mut s, l) = rgb_to_hsl((
                     model.mesh.vertex_color[index * 3 + 0],
                     model.mesh.vertex_color[index * 3 + 1],
-                    model.mesh.vertex_color[index * 3 + 2]
+                    model.mesh.vertex_color[index * 3 + 2],
                 ));
                 //l = l.powf(1.0/1.0);
                 s *= 1.25;
@@ -61,12 +73,9 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                         as i16,
                     pos_z: (model.mesh.positions[index * 3 + 2] * 1024.0).clamp(-32768.0, 32767.0)
                         as i16,
-                    color_r: (r * 255.0).clamp(0.0, 255.0)
-                        as u8,
-                    color_g: (g * 255.0).clamp(0.0, 255.0)
-                        as u8,
-                    color_b: (b * 255.0).clamp(0.0, 255.0)
-                        as u8,
+                    color_r: (r * 255.0).clamp(0.0, 255.0) as u8,
+                    color_g: (g * 255.0).clamp(0.0, 255.0) as u8,
+                    color_b: (b * 255.0).clamp(0.0, 255.0) as u8,
                     tex_u: (model.mesh.texcoords[index * 2 + 0] * 255.0) as u8,
                     tex_v: (255.0 - (model.mesh.texcoords[index * 2 + 1] * 255.0)) as u8,
                     texture_id: match model.mesh.material_id {
@@ -98,7 +107,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                     z_max -= z_min;
                     let size = ((x_max*x_max + y_max*y_max + z_max*z_max) as f64).sqrt();
                     curr_primitive[2].texture_id = (size / 16.0).clamp(0.0, 255.0) as u8; // bigger number means bigger primitive
-            
+
                     for i in [0, 2, 1] {
                         triangles.push(curr_primitive[i]);
                     }
@@ -124,14 +133,14 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                     z_max -= z_min;
                     let size = ((x_max*x_max + y_max*y_max + z_max*z_max) as f64).sqrt();
                     curr_primitive[3].texture_id = (size / 16.0).clamp(0.0, 255.0) as u8; // bigger number means bigger primitive
-            
+
                     for i in [0, 3, 1, 2]{
                         quads.push(curr_primitive[i]);
                     }
                 },
                 _ => println!("found polygon with more than 4 vertices! make sure the mesh only contains triangles and quads."),
             };
-            
+
             curr_index += arity;
         }
 
@@ -171,24 +180,57 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             let grid_size = (1800.0, 8000.0, 1800.0);
             for triangle in value.triangles.chunks(3) {
                 // Find which gridcell this triangle belongs to
-                let avg_pos_x = (triangle[0].pos_x as f64 + triangle[1].pos_x as f64 + triangle[2].pos_x as f64) / 3.0;
-                let avg_pos_y = (triangle[0].pos_y as f64 + triangle[1].pos_y as f64 + triangle[2].pos_y as f64) / 3.0;
-                let avg_pos_z = (triangle[0].pos_z as f64 + triangle[1].pos_z as f64 + triangle[2].pos_z as f64) / 3.0;
+                let avg_pos_x = (triangle[0].pos_x as f64
+                    + triangle[1].pos_x as f64
+                    + triangle[2].pos_x as f64)
+                    / 3.0;
+                let avg_pos_y = (triangle[0].pos_y as f64
+                    + triangle[1].pos_y as f64
+                    + triangle[2].pos_y as f64)
+                    / 3.0;
+                let avg_pos_z = (triangle[0].pos_z as f64
+                    + triangle[1].pos_z as f64
+                    + triangle[2].pos_z as f64)
+                    / 3.0;
                 let grid_x = (avg_pos_x / grid_size.0) as i16;
                 let grid_y = (avg_pos_y / grid_size.1) as i16;
                 let grid_z = (avg_pos_z / grid_size.2) as i16;
-                let mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                let mesh_psx =
+                    grid_map
+                        .entry((grid_x, grid_y, grid_z))
+                        .or_insert_with(|| MeshGridEntry {
+                            triangles: Vec::new(),
+                            quads: Vec::new(),
+                        });
                 mesh_psx.triangles.extend(triangle);
             }
             for quad in value.quads.chunks(4) {
                 // Find which gridcell this triangle belongs to
-                let avg_pos_x = (quad[0].pos_x as f64 + quad[1].pos_x as f64 + quad[2].pos_x as f64 + quad[3].pos_x as f64) / 3.0;
-                let avg_pos_y = (quad[0].pos_y as f64 + quad[1].pos_y as f64 + quad[2].pos_y as f64 + quad[3].pos_y as f64) / 3.0;
-                let avg_pos_z = (quad[0].pos_z as f64 + quad[1].pos_z as f64 + quad[2].pos_z as f64 + quad[3].pos_z as f64) / 3.0;
+                let avg_pos_x = (quad[0].pos_x as f64
+                    + quad[1].pos_x as f64
+                    + quad[2].pos_x as f64
+                    + quad[3].pos_x as f64)
+                    / 3.0;
+                let avg_pos_y = (quad[0].pos_y as f64
+                    + quad[1].pos_y as f64
+                    + quad[2].pos_y as f64
+                    + quad[3].pos_y as f64)
+                    / 3.0;
+                let avg_pos_z = (quad[0].pos_z as f64
+                    + quad[1].pos_z as f64
+                    + quad[2].pos_z as f64
+                    + quad[3].pos_z as f64)
+                    / 3.0;
                 let grid_x = (avg_pos_x / grid_size.0) as i16;
                 let grid_y = (avg_pos_y / grid_size.1) as i16;
                 let grid_z = (avg_pos_z / grid_size.2) as i16;
-                let mesh_psx = grid_map.entry((grid_x, grid_y, grid_z)).or_insert_with(||MeshGridEntry{ triangles: Vec::new(), quads: Vec::new()});
+                let mesh_psx =
+                    grid_map
+                        .entry((grid_x, grid_y, grid_z))
+                        .or_insert_with(|| MeshGridEntry {
+                            triangles: Vec::new(),
+                            quads: Vec::new(),
+                        });
                 mesh_psx.quads.extend(quad);
             }
         }
@@ -283,11 +325,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             }
 
             // Calculate size
-            let (size_x, size_y, size_z) = (
-                max_x - min_x, 
-                max_y - min_y, 
-                max_z - min_z,
-            );
+            let (size_x, size_y, size_z) = (max_x - min_x, max_y - min_y, max_z - min_z);
 
             // Figure out the best split count - a bit expensive, since we brute force it, but that's fine for lower poly meshes like on PS1
             let mut current_best: Vec<MeshPSX> = Vec::new();
@@ -295,16 +333,34 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             for splits_x in 1..6 {
                 for splits_y in 1..6 {
                     for splits_z in 1..6 {
-                        let mut meshes_to_add : Vec<MeshPSX> = Vec::new();
-                        split_equal_based_on_aabb(&name, splits_z, min_z, size_z, splits_y, min_y, size_y, splits_x, min_x, size_x, &mesh, &mut meshes_to_add);
+                        let mut meshes_to_add: Vec<MeshPSX> = Vec::new();
+                        split_equal_based_on_aabb(
+                            &name,
+                            splits_z,
+                            min_z,
+                            size_z,
+                            splits_y,
+                            min_y,
+                            size_y,
+                            splits_x,
+                            min_x,
+                            size_x,
+                            &mesh,
+                            &mut meshes_to_add,
+                        );
 
                         // Calculate score. How big is the deviation from the target we want?
                         let mut error = 0;
                         for mesh in &meshes_to_add {
-                            error += (mesh.n_quads as i64 + mesh.n_triangles as i64 - target_polygon_count_per_mesh as i64).abs();
-                            error += (splits_x - splits_y).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
-                            error += (splits_y - splits_z).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
-                            error += (splits_z - splits_x).abs() as i64 * 20 / (splits_x + splits_y + splits_z) as i64;
+                            error += (mesh.n_quads as i64 + mesh.n_triangles as i64
+                                - target_polygon_count_per_mesh as i64)
+                                .abs();
+                            error += (splits_x - splits_y).abs() as i64 * 20
+                                / (splits_x + splits_y + splits_z) as i64;
+                            error += (splits_y - splits_z).abs() as i64 * 20
+                                / (splits_x + splits_y + splits_z) as i64;
+                            error += (splits_z - splits_x).abs() as i64 * 20
+                                / (splits_x + splits_y + splits_z) as i64;
                         }
 
                         // Is it better than before? Store the result
@@ -385,22 +441,98 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
 
             // Quantize it to 16 colours
             let mut tex_data_exoquant = Vec::new();
+            let mut has_transparent_pixels = false;
             for pixel in tex_data_src.chunks(depth) {
                 match depth {
-                    4 => tex_data_exoquant
-                        .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], pixel[3])),
+                    4 => {
+                        if pixel[3] == 0 {
+                            has_transparent_pixels = true;
+                            tex_data_exoquant.push(exoquant::Color::new(0, 0, 0, 0))
+                        } else {
+                            tex_data_exoquant
+                                .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255))
+                        }
+                    }
                     3 => tex_data_exoquant
                         .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255)),
                     _ => panic!(),
                 }
             }
-            let (palette, indexed_data) = convert_to_indexed(
-                &tex_data_exoquant,
-                width,
-                match using_texture_page {false => 16, true => 256},
-                &optimizer::KMeans,
-                &ditherer::Ordered,
+
+            // Make half the histogram transparent pixels so that the quantizer actually generates a palette that contains one of those
+            let mut histogram_data = tex_data_exoquant.clone();
+            if has_transparent_pixels {
+                let n = tex_data_exoquant.len();
+                for _ in 0..n {
+                    histogram_data.push(Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 0,
+                    });
+                }
+            }
+            let histogram: &exoquant::Histogram = &histogram_data.iter().cloned().collect();
+            let palette = generate_palette(
+                histogram,
+                &SimpleColorSpace::default(),
+                &optimizer::WeightedKMeans,
+                match using_texture_page {
+                    false => 16,
+                    true => 256,
+                },
             );
+            let mut palette = optimizer::WeightedKMeans.optimize_palette(
+                &SimpleColorSpace::default(),
+                &palette,
+                histogram,
+                8,
+            );
+            let mut indexed_data = exoquant::Remapper::new(
+                &palette,
+                &SimpleColorSpace::default(),
+                &exoquant::ditherer::Ordered,
+            )
+            .remap(&tex_data_exoquant, width);
+
+            // If the palette has a transparent pixel color, move it to index 0
+            // This makes it easiest to implement using Nintendo DS OpenGL implementation
+            // Additionally, make the color full black. This way the PS1 knows it's transparent too
+            let mut n_transparent_colors = 0;
+            let mut transparent_index = 0;
+            for (index, color) in palette.iter_mut().enumerate() {
+                if color.a == 0 {
+                    transparent_index = index;
+                    n_transparent_colors += 1;
+                    color.r = 0;
+                    color.g = 0;
+                    color.b = 0;
+                }
+            }
+
+            println!(
+                "{}: {}, {}, {}, {}",
+                name, palette[0].r, palette[0].g, palette[0].b, palette[0].a
+            );
+
+            if n_transparent_colors > 0 {
+                // Swap the transparent and first colors
+                let temp = palette[0];
+                palette[0] = palette[transparent_index];
+                palette[transparent_index] = temp;
+
+                // Then remap the indices in the texture
+                for pixel in &mut indexed_data {
+                    if *pixel == transparent_index as u8 {
+                        *pixel = 0;
+                    } else if *pixel == 0 {
+                        *pixel = transparent_index as u8;
+                    }
+                }
+            } else if n_transparent_colors > 1 {
+                println!("multiple transparent colors detected in texture {name}")
+            }
+
             let color_b = Color {
                 r: (avg_r) as u8,
                 g: (avg_g) as u8,
@@ -439,9 +571,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
             if using_texture_page {
                 for i in 0..(width * height) {
                     if i < indexed_data.len() {
-                        tex_cell
-                            .texture_data
-                            .push(indexed_data[i]);
+                        tex_cell.texture_data.push(indexed_data[i]);
                     } else {
                         tex_cell.texture_data.push(0);
                         tex_cell.texture_data.push(0);
@@ -449,8 +579,7 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
                         tex_cell.texture_data.push(0);
                     }
                 }
-            }
-            else {
+            } else {
                 for i in (0..(width * height)).step_by(2) {
                     if (i + 1) < indexed_data.len() {
                         tex_cell
@@ -475,17 +604,30 @@ pub fn obj2msh_txc(input_obj: String, output_msh: String, output_txc: String, us
     txc_psx.save(Path::new(&output_txc)).unwrap();
 }
 
-fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i16, splits_y: i16, min_y: i16, size_y: i16, splits_x: i16, min_x: i16, size_x: i16, mesh: &MeshGridEntry, meshes_to_add: &mut Vec<MeshPSX>) {
+fn split_equal_based_on_aabb(
+    name: &String,
+    splits_z: i16,
+    min_z: i16,
+    size_z: i16,
+    splits_y: i16,
+    min_y: i16,
+    size_y: i16,
+    splits_x: i16,
+    min_x: i16,
+    size_x: i16,
+    mesh: &MeshGridEntry,
+    meshes_to_add: &mut Vec<MeshPSX>,
+) {
     let mut coords_x = vec![i16::MIN];
     let mut coords_y = vec![i16::MIN];
     let mut coords_z = vec![i16::MIN];
-    for x in 0..(splits_x+1) {
+    for x in 0..(splits_x + 1) {
         coords_x.push(min_x + ((size_x as f64 / splits_x as f64) * x as f64).ceil() as i16);
-    }    
-    for y in 0..(splits_y+1) {
+    }
+    for y in 0..(splits_y + 1) {
         coords_y.push(min_y + ((size_y as f64 / splits_y as f64) * y as f64).ceil() as i16);
-    }    
-    for z in 0..(splits_z+1) {
+    }
+    for z in 0..(splits_z + 1) {
         coords_z.push(min_z + ((size_z as f64 / splits_z as f64) * z as f64).ceil() as i16);
     }
     coords_x[1] -= 1;
@@ -495,12 +637,12 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
     coords_y.push(i16::MAX);
     coords_z.push(i16::MAX);
 
-    for z in 0..(coords_z.len()-1) {
-        let (curr_min_z, curr_max_z) = (coords_z[z], coords_z[z+1]);
-        for y in 0..(coords_y.len()-1) {
-            let (curr_min_y, curr_max_y) = (coords_y[y], coords_y[y+1]);
-            for x in 0..(coords_x.len()-1) {
-                let (curr_min_x, curr_max_x) = (coords_x[x], coords_x[x+1]);
+    for z in 0..(coords_z.len() - 1) {
+        let (curr_min_z, curr_max_z) = (coords_z[z], coords_z[z + 1]);
+        for y in 0..(coords_y.len() - 1) {
+            let (curr_min_y, curr_max_y) = (coords_y[y], coords_y[y + 1]);
+            for x in 0..(coords_x.len() - 1) {
+                let (curr_min_x, curr_max_x) = (coords_x[x], coords_x[x + 1]);
                 // Find all triangles where the center is inside that bounding box
                 let mut tris = Vec::<VertexPSX>::new();
                 let mut quads = Vec::<VertexPSX>::new();
@@ -510,15 +652,28 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
                     for triangle in mesh.triangles.chunks(3) {
                         // Calculate center
                         let (center_x, center_y, center_z) = (
-                            ((triangle[0].pos_x as i32 + triangle[1].pos_x as i32 + triangle[2].pos_x as i32) / 3) as i16,
-                            ((triangle[0].pos_y as i32 + triangle[1].pos_y as i32 + triangle[2].pos_y as i32) / 3) as i16,
-                            ((triangle[0].pos_z as i32 + triangle[1].pos_z as i32 + triangle[2].pos_z as i32) / 3) as i16,
+                            ((triangle[0].pos_x as i32
+                                + triangle[1].pos_x as i32
+                                + triangle[2].pos_x as i32)
+                                / 3) as i16,
+                            ((triangle[0].pos_y as i32
+                                + triangle[1].pos_y as i32
+                                + triangle[2].pos_y as i32)
+                                / 3) as i16,
+                            ((triangle[0].pos_z as i32
+                                + triangle[1].pos_z as i32
+                                + triangle[2].pos_z as i32)
+                                / 3) as i16,
                         );
 
                         // If it's in the bounding box
-                        if center_x > curr_min_x && center_x <= curr_max_x
-                        && center_y > curr_min_y && center_y <= curr_max_y
-                        && center_z > curr_min_z && center_z <= curr_max_z {
+                        if center_x > curr_min_x
+                            && center_x <= curr_max_x
+                            && center_y > curr_min_y
+                            && center_y <= curr_max_y
+                            && center_z > curr_min_z
+                            && center_z <= curr_max_z
+                        {
                             if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
                                 println!("out of bounds triangle? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
                             }
@@ -529,15 +684,31 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
                     for quad in mesh.quads.chunks(4) {
                         // Calculate center
                         let (center_x, center_y, center_z) = (
-                            ((quad[0].pos_x as i32 + quad[1].pos_x as i32 + quad[2].pos_x as i32 + quad[3].pos_x as i32) / 4) as i16,
-                            ((quad[0].pos_y as i32 + quad[1].pos_y as i32 + quad[2].pos_y as i32 + quad[3].pos_y as i32) / 4) as i16,
-                            ((quad[0].pos_z as i32 + quad[1].pos_z as i32 + quad[2].pos_z as i32 + quad[3].pos_z as i32) / 4) as i16,
+                            ((quad[0].pos_x as i32
+                                + quad[1].pos_x as i32
+                                + quad[2].pos_x as i32
+                                + quad[3].pos_x as i32)
+                                / 4) as i16,
+                            ((quad[0].pos_y as i32
+                                + quad[1].pos_y as i32
+                                + quad[2].pos_y as i32
+                                + quad[3].pos_y as i32)
+                                / 4) as i16,
+                            ((quad[0].pos_z as i32
+                                + quad[1].pos_z as i32
+                                + quad[2].pos_z as i32
+                                + quad[3].pos_z as i32)
+                                / 4) as i16,
                         );
 
                         // If it's in the bounding box
-                        if center_x > curr_min_x && center_x <= curr_max_x
-                        && center_y > curr_min_y && center_y <= curr_max_y
-                        && center_z > curr_min_z && center_z <= curr_max_z {
+                        if center_x > curr_min_x
+                            && center_x <= curr_max_x
+                            && center_y > curr_min_y
+                            && center_y <= curr_max_y
+                            && center_z > curr_min_z
+                            && center_z <= curr_max_z
+                        {
                             if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
                                 println!("out of bounds quad? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
                             }
@@ -545,7 +716,7 @@ fn split_equal_based_on_aabb(name: &String, splits_z: i16, min_z: i16, size_z: i
                         }
                     }
                 }
-            
+
                 // Filter out empty meshes
                 if tris.is_empty() && quads.is_empty() {
                     continue;

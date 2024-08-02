@@ -8,10 +8,10 @@ use crate::psx_structs::VertexPSX;
 mod bsp;
 mod collision;
 mod helpers;
+mod kmeans;
 mod psx_structs;
 mod texture_page;
 mod visual;
-mod kmeans;
 use clap::Parser;
 
 pub struct MeshGridEntry {
