@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use exoquant::{convert_to_indexed, ditherer, optimizer};
+use exoquant::{
+    generate_palette,
+    optimizer::{self, Optimizer},
+    Color, SimpleColorSpace,
+};
 
 use crate::psx_structs::{TextureCellPSX, TextureCollectionPSX};
 
@@ -18,22 +22,86 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
 
     // Quantize it to 16 colours
     let mut tex_data_exoquant = Vec::new();
+    let mut has_transparent_pixels = false;
     for pixel in image.data.chunks(image.depth) {
         match image.depth {
             4 => {
-                tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], pixel[3]))
+                if pixel[3] == 0 {
+                    has_transparent_pixels = true;
+                    tex_data_exoquant.push(exoquant::Color::new(0, 0, 0, 0))
+                } else {
+                    tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255))
+                }
             }
             3 => tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255)),
             _ => panic!(),
         }
     }
-    let (palette, indexed_data) = convert_to_indexed(
-        &tex_data_exoquant,
-        image.width,
+    // Make half the histogram transparent pixels so that the quantizer actually generates a palette that contains one of those
+    let mut histogram_data = tex_data_exoquant.clone();
+    if has_transparent_pixels {
+        let n = tex_data_exoquant.len();
+        for _ in 0..n {
+            histogram_data.push(Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            });
+        }
+    }
+    let histogram: &exoquant::Histogram = &histogram_data.iter().cloned().collect();
+    let palette = generate_palette(
+        histogram,
+        &SimpleColorSpace::default(),
+        &optimizer::WeightedKMeans,
         256,
-        &optimizer::KMeans,
-        &ditherer::Ordered,
     );
+    let mut palette = optimizer::WeightedKMeans.optimize_palette(
+        &SimpleColorSpace::default(),
+        &palette,
+        histogram,
+        8,
+    );
+    let mut indexed_data = exoquant::Remapper::new(
+        &palette,
+        &SimpleColorSpace::default(),
+        &exoquant::ditherer::Ordered,
+    )
+    .remap(&tex_data_exoquant, image.width);
+
+    // If the palette has a transparent pixel color, move it to index 0
+    // This makes it easiest to implement using Nintendo DS OpenGL implementation
+    // Additionally, make the color full black. This way the PS1 knows it's transparent too
+    let mut n_transparent_colors = 0;
+    let mut transparent_index = 0;
+    for (index, color) in palette.iter_mut().enumerate() {
+        if color.a == 0 {
+            transparent_index = index;
+            n_transparent_colors += 1;
+            color.r = 0;
+            color.g = 0;
+            color.b = 0;
+        }
+    }
+
+    if n_transparent_colors > 0 {
+        // Swap the transparent and first colors
+        let temp = palette[0];
+        palette[0] = palette[transparent_index];
+        palette[transparent_index] = temp;
+
+        // Then remap the indices in the texture
+        for pixel in &mut indexed_data {
+            if *pixel == transparent_index as u8 {
+                *pixel = 0;
+            } else if *pixel == 0 {
+                *pixel = transparent_index as u8;
+            }
+        }
+    } else if n_transparent_colors > 1 {
+        println!("multiple transparent colors detected in texture {input:?}")
+    }
 
     // Convert palette to 16 bit
     let mut tex_palette = Vec::<u16>::new();
@@ -42,7 +110,11 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
             tex_palette.push(
                 (color.r as u16 & 0b11111000) >> 3
                     | (color.g as u16 & 0b11111000) << 2
-                    | (color.b as u16 & 0b11111000) << 7,
+                    | (color.b as u16 & 0b11111000) << 7
+                    | match color.a {
+                        0 => 0,
+                        _ => 1 << 15,
+                    },
             );
         } else {
             tex_palette.push(0);
