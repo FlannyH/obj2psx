@@ -510,11 +510,6 @@ pub fn obj2msh_txc(
                 }
             }
 
-            println!(
-                "{}: {}, {}, {}, {}",
-                name, palette[0].r, palette[0].g, palette[0].b, palette[0].a
-            );
-
             if n_transparent_colors > 0 {
                 // Swap the transparent and first colors
                 let temp = palette[0];
