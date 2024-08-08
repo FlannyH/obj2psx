@@ -76,8 +76,8 @@ pub fn obj2msh_txc(
                     color_r: (r * 255.0).clamp(0.0, 255.0) as u8,
                     color_g: (g * 255.0).clamp(0.0, 255.0) as u8,
                     color_b: (b * 255.0).clamp(0.0, 255.0) as u8,
-                    tex_u: (model.mesh.texcoords[index * 2 + 0] * 255.0) as u8,
-                    tex_v: (255.0 - (model.mesh.texcoords[index * 2 + 1] * 255.0)) as u8,
+                    tex_u: (model.mesh.texcoords[index * 2 + 0] * 255.0).round() as u8,
+                    tex_v: (255.0 - (model.mesh.texcoords[index * 2 + 1] * 255.0)).round() as u8,
                     texture_id: match model.mesh.material_id {
                         None => 255,
                         Some(a) => a as u8,
