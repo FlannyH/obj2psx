@@ -30,6 +30,47 @@ pub fn obj2msh_txc(
     )
     .expect("Failed to OBJ load file");
 
+    // Create a material mapping to filter out special material types like occluders
+    let mut material_mapping = vec![];
+    let mut psx_id_tex_mapping = vec![];
+    if let Ok(materials_vec) = &materials {
+        for material in materials_vec {
+            // First let's figure out what we have in this material. Is it textured? Is it untextured? Is it an occluder?
+            let psx_tex_id;
+
+            if material.name.contains("occlude") {
+                psx_tex_id = 254;
+            } else if let Some(tex_path) = &material.diffuse_texture {
+                // If the texture path is already in here, reuse the corresponding material index
+                if let Some(already_added_id) =
+                    psx_id_tex_mapping.iter().position(|x| *x == *tex_path)
+                {
+                    psx_tex_id = already_added_id;
+                }
+                // Otherwise add it to the list
+                else {
+                    psx_tex_id = psx_id_tex_mapping.len();
+                    psx_id_tex_mapping.push(tex_path.to_string());
+                }
+            } else {
+                psx_tex_id = 255;
+            }
+
+            // Now we know what this is, let's add it to the mapping
+            material_mapping.push(psx_tex_id);
+        }
+    }
+
+    // debug
+    for (obj_mat_id, psx_tex_id) in material_mapping.iter().enumerate() {
+        let tex_name = match *psx_tex_id {
+            255 => "(no texture)".to_string(),
+            254 => "(occluder)".to_string(),
+            x => psx_id_tex_mapping.get(x).unwrap().to_string(),
+        };
+        println!("{obj_mat_id}: tex id {psx_tex_id}: {}", tex_name);
+    }
+
     let mut model_psx = ModelPSX::new();
     let mut txc_psx = TextureCollectionPSX::new();
     let mut mesh_map: HashMap<String, MeshGridEntry> = HashMap::new();
@@ -80,7 +121,7 @@ pub fn obj2msh_txc(
                     tex_v: (255.0 - (model.mesh.texcoords[index * 2 + 1] * 255.0)).round() as u8,
                     texture_id: match model.mesh.material_id {
                         None => 255,
-                        Some(a) => a as u8,
+                        Some(a) => *(material_mapping.get(a).unwrap_or(&255)) as u8,
                     },
                 };
                 curr_primitive.push(vert);
@@ -377,222 +418,217 @@ pub fn obj2msh_txc(
         }
     }
 
-    if let Ok(materials) = materials {
-        for material in materials {
-            let mut tex_data_src = vec![0xFF; 64 * 64 * 4];
-            let mut depth = 4;
-            let mut width = 64;
-            let mut height = 64;
-            let mut name = String::from("none");
+    for tex_path in psx_id_tex_mapping {
+        let mut tex_data_src = vec![0xFF; 64 * 64 * 4];
+        let mut depth = 4;
+        let mut width = 64;
+        let mut height = 64;
 
-            if material.diffuse_texture.is_some() {
-                // Load the image file corresponding to the material
-                let input_path = Path::new(&input_obj);
-                let parent_directory = input_path.parent().expect("Invalid file path");
-                let combined_path = parent_directory.join(material.diffuse_texture.unwrap());
-                name = String::from(combined_path.to_str().unwrap());
-                let raw_image = match stb_image::image::load(&name) {
-                    stb_image::image::LoadResult::ImageU8(image) => Some(image),
-                    _ => None,
-                };
-
-                // todo: Fit it to 64x64 pixels
-                if let Some(raw_image) = raw_image {
-                    tex_data_src = raw_image.data;
-                    depth = raw_image.depth;
-                    width = raw_image.width;
-                    height = raw_image.height;
-                }
-            }
-
-            // Create texture cell object
-            let mut tex_cell = TextureCellPSX {
-                texture_data: Vec::new(),
-                palette: Vec::new(),
-                texture_width: 64,
-                texture_height: 64,
-                avg_color: 0,
+        {
+            // Load the image file corresponding to the material
+            let input_path = Path::new(&input_obj);
+            let parent_directory = input_path.parent().expect("Invalid file path");
+            let combined_path = parent_directory.join(tex_path);
+            name = String::from(combined_path.to_str().unwrap());
+            let raw_image = match stb_image::image::load(&name) {
+                stb_image::image::LoadResult::ImageU8(image) => Some(image),
+                _ => None,
             };
-            // Calculate average color
-            let mut avg_r = 0;
-            let mut avg_g = 0;
-            let mut avg_b = 0;
-            let mut avg_a = 0;
-            for pixel in tex_data_src.chunks(depth) {
-                avg_r += pixel[0] as u32;
-                avg_g += pixel[1] as u32;
-                avg_b += pixel[2] as u32;
-                match depth {
-                    4 => avg_a += pixel[3] as u32,
-                    3 => avg_a += 255,
-                    _ => panic!(),
-                }
-                if depth == 4 {
-                    avg_a += pixel[3] as u32;
-                } else {
-                    avg_a += 255
-                }
+
+            // todo: Fit it to 64x64 pixels
+            if let Some(raw_image) = raw_image {
+                tex_data_src = raw_image.data;
+                depth = raw_image.depth;
+                width = raw_image.width;
+                height = raw_image.height;
             }
-            avg_r /= 64 * 64;
-            avg_g /= 64 * 64;
-            avg_b /= 64 * 64;
-            avg_a /= 64 * 64;
-            tex_cell.avg_color = avg_r | avg_b << 8 | avg_g << 16 | avg_a << 24;
-
-            // Quantize it to 16 colours
-            let mut tex_data_exoquant = Vec::new();
-            let mut has_transparent_pixels = false;
-            for pixel in tex_data_src.chunks(depth) {
-                match depth {
-                    4 => {
-                        if pixel[3] == 0 {
-                            has_transparent_pixels = true;
-                            tex_data_exoquant.push(exoquant::Color::new(0, 0, 0, 0))
-                        } else {
-                            tex_data_exoquant
-                                .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255))
-                        }
-                    }
-                    3 => tex_data_exoquant
-                        .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255)),
-                    _ => panic!(),
-                }
-            }
-
-            // Make half the histogram transparent pixels so that the quantizer actually generates a palette that contains one of those
-            let mut histogram_data = tex_data_exoquant.clone();
-            if has_transparent_pixels {
-                let n = tex_data_exoquant.len();
-                for _ in 0..n {
-                    histogram_data.push(Color {
-                        r: 0,
-                        g: 0,
-                        b: 0,
-                        a: 0,
-                    });
-                }
-            }
-            let histogram: &exoquant::Histogram = &histogram_data.iter().cloned().collect();
-            let palette = generate_palette(
-                histogram,
-                &SimpleColorSpace::default(),
-                &optimizer::WeightedKMeans,
-                match using_texture_page {
-                    false => 16,
-                    true => 256,
-                },
-            );
-            let mut palette = optimizer::WeightedKMeans.optimize_palette(
-                &SimpleColorSpace::default(),
-                &palette,
-                histogram,
-                8,
-            );
-            let mut indexed_data = exoquant::Remapper::new(
-                &palette,
-                &SimpleColorSpace::default(),
-                &exoquant::ditherer::Ordered,
-            )
-            .remap(&tex_data_exoquant, width);
-
-            // If the palette has a transparent pixel color, move it to index 0
-            // This makes it easiest to implement using Nintendo DS OpenGL implementation
-            // Additionally, make the color full black. This way the PS1 knows it's transparent too
-            let mut n_transparent_colors = 0;
-            let mut transparent_index = 0;
-            for (index, color) in palette.iter_mut().enumerate() {
-                if color.a == 0 {
-                    transparent_index = index;
-                    n_transparent_colors += 1;
-                    color.r = 0;
-                    color.g = 0;
-                    color.b = 0;
-                }
-            }
-
-            if n_transparent_colors > 0 {
-                // Swap the transparent and first colors
-                let temp = palette[0];
-                palette[0] = palette[transparent_index];
-                palette[transparent_index] = temp;
-
-                // Then remap the indices in the texture
-                for pixel in &mut indexed_data {
-                    if *pixel == transparent_index as u8 {
-                        *pixel = 0;
-                    } else if *pixel == 0 {
-                        *pixel = transparent_index as u8;
-                    }
-                }
-            } else if n_transparent_colors > 1 {
-                println!("multiple transparent colors detected in texture {name}")
-            }
-
-            let color_b = Color {
-                r: (avg_r) as u8,
-                g: (avg_g) as u8,
-                b: (avg_b) as u8,
-                a: (avg_a) as u8,
-            };
-            for fade_level in 0..16 {
-                for color in &palette {
-                    let mut color16: u16 = (color.a as u16).clamp(0, 1) << 15
-                        | ((((fade_level * color_b.b as u16)
-                            + ((15 - fade_level) * color.b as u16))
-                            / 15)
-                            >> 3)
-                            .clamp(0, 31)
-                            << 10
-                        | ((((fade_level * color_b.g as u16)
-                            + ((15 - fade_level) * color.g as u16))
-                            / 15)
-                            >> 3)
-                            .clamp(0, 31)
-                            << 5
-                        | ((((fade_level * color_b.r as u16)
-                            + ((15 - fade_level) * color.r as u16))
-                            / 15)
-                            >> 3)
-                            .clamp(0, 31)
-                            << 0;
-                    if color.a == 0 {
-                        color16 = 0;
-                    }
-                    tex_cell.palette.push(color16);
-                }
-            }
-
-            // Convert indices to 4 bit
-            if using_texture_page {
-                for i in 0..(width * height) {
-                    if i < indexed_data.len() {
-                        tex_cell.texture_data.push(indexed_data[i]);
-                    } else {
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                    }
-                }
-            } else {
-                for i in (0..(width * height)).step_by(2) {
-                    if (i + 1) < indexed_data.len() {
-                        tex_cell
-                            .texture_data
-                            .push((indexed_data[i + 1] << 4) | (indexed_data[i + 0]));
-                    } else {
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                        tex_cell.texture_data.push(0);
-                    }
-                }
-            }
-
-            // Add this cell to the collection
-            txc_psx.texture_cells.push(tex_cell);
-            txc_psx.texture_names.push(name);
         }
+
+        // Create texture cell object
+        let mut tex_cell = TextureCellPSX {
+            texture_data: Vec::new(),
+            palette: Vec::new(),
+            texture_width: 64,
+            texture_height: 64,
+            avg_color: 0,
+        };
+        // Calculate average color
+        let mut avg_r = 0;
+        let mut avg_g = 0;
+        let mut avg_b = 0;
+        let mut avg_a = 0;
+        for pixel in tex_data_src.chunks(depth) {
+            avg_r += pixel[0] as u32;
+            avg_g += pixel[1] as u32;
+            avg_b += pixel[2] as u32;
+            match depth {
+                4 => avg_a += pixel[3] as u32,
+                3 => avg_a += 255,
+                _ => panic!(),
+            }
+            if depth == 4 {
+                avg_a += pixel[3] as u32;
+            } else {
+                avg_a += 255
+            }
+        }
+        avg_r /= 64 * 64;
+        avg_g /= 64 * 64;
+        avg_b /= 64 * 64;
+        avg_a /= 64 * 64;
+        tex_cell.avg_color = avg_r | avg_b << 8 | avg_g << 16 | avg_a << 24;
+
+        // Quantize it to 16 colours
+        let mut tex_data_exoquant = Vec::new();
+        let mut has_transparent_pixels = false;
+        for pixel in tex_data_src.chunks(depth) {
+            match depth {
+                4 => {
+                    if pixel[3] == 0 {
+                        has_transparent_pixels = true;
+                        tex_data_exoquant.push(exoquant::Color::new(0, 0, 0, 0))
+                    } else {
+                        tex_data_exoquant
+                            .push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255))
+                    }
+                }
+                3 => {
+                    tex_data_exoquant.push(exoquant::Color::new(pixel[0], pixel[1], pixel[2], 255))
+                }
+                _ => panic!(),
+            }
+        }
+
+        // Make half the histogram transparent pixels so that the quantizer actually generates a palette that contains one of those
+        let mut histogram_data = tex_data_exoquant.clone();
+        if has_transparent_pixels {
+            let n = tex_data_exoquant.len();
+            for _ in 0..n {
+                histogram_data.push(Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 0,
+                });
+            }
+        }
+        let histogram: &exoquant::Histogram = &histogram_data.iter().cloned().collect();
+        let palette = generate_palette(
+            histogram,
+            &SimpleColorSpace::default(),
+            &optimizer::WeightedKMeans,
+            match using_texture_page {
+                false => 16,
+                true => 256,
+            },
+        );
+        let mut palette = optimizer::WeightedKMeans.optimize_palette(
+            &SimpleColorSpace::default(),
+            &palette,
+            histogram,
+            8,
+        );
+        let mut indexed_data = exoquant::Remapper::new(
+            &palette,
+            &SimpleColorSpace::default(),
+            &exoquant::ditherer::Ordered,
+        )
+        .remap(&tex_data_exoquant, width);
+
+        // If the palette has a transparent pixel color, move it to index 0
+        // This makes it easiest to implement using Nintendo DS OpenGL implementation
+        // Additionally, make the color full black. This way the PS1 knows it's transparent too
+        let mut n_transparent_colors = 0;
+        let mut transparent_index = 0;
+        for (index, color) in palette.iter_mut().enumerate() {
+            if color.a == 0 {
+                transparent_index = index;
+                n_transparent_colors += 1;
+                color.r = 0;
+                color.g = 0;
+                color.b = 0;
+            }
+        }
+
+        if n_transparent_colors > 0 {
+            // Swap the transparent and first colors
+            let temp = palette[0];
+            palette[0] = palette[transparent_index];
+            palette[transparent_index] = temp;
+
+            // Then remap the indices in the texture
+            for pixel in &mut indexed_data {
+                if *pixel == transparent_index as u8 {
+                    *pixel = 0;
+                } else if *pixel == 0 {
+                    *pixel = transparent_index as u8;
+                }
+            }
+        } else if n_transparent_colors > 1 {
+            println!("multiple transparent colors detected in texture {name}")
+        }
+
+        let color_b = Color {
+            r: (avg_r) as u8,
+            g: (avg_g) as u8,
+            b: (avg_b) as u8,
+            a: (avg_a) as u8,
+        };
+        for fade_level in 0..16 {
+            for color in &palette {
+                let mut color16: u16 = (color.a as u16).clamp(0, 1) << 15
+                    | ((((fade_level * color_b.b as u16) + ((15 - fade_level) * color.b as u16))
+                        / 15)
+                        >> 3)
+                        .clamp(0, 31)
+                        << 10
+                    | ((((fade_level * color_b.g as u16) + ((15 - fade_level) * color.g as u16))
+                        / 15)
+                        >> 3)
+                        .clamp(0, 31)
+                        << 5
+                    | ((((fade_level * color_b.r as u16) + ((15 - fade_level) * color.r as u16))
+                        / 15)
+                        >> 3)
+                        .clamp(0, 31)
+                        << 0;
+                if color.a == 0 {
+                    color16 = 0;
+                }
+                tex_cell.palette.push(color16);
+            }
+        }
+
+        // Convert indices to 4 bit
+        if using_texture_page {
+            for i in 0..(width * height) {
+                if i < indexed_data.len() {
+                    tex_cell.texture_data.push(indexed_data[i]);
+                } else {
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                }
+            }
+        } else {
+            for i in (0..(width * height)).step_by(2) {
+                if (i + 1) < indexed_data.len() {
+                    tex_cell
+                        .texture_data
+                        .push((indexed_data[i + 1] << 4) | (indexed_data[i + 0]));
+                } else {
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                    tex_cell.texture_data.push(0);
+                }
+            }
+        }
+
+        // Add this cell to the collection
+        txc_psx.texture_cells.push(tex_cell);
+        txc_psx.texture_names.push(name);
     }
 
     model_psx.save(Path::new(&output_msh)).unwrap();
