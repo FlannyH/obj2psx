@@ -423,6 +423,7 @@ pub fn obj2msh_txc(
         let mut depth = 4;
         let mut width = 64;
         let mut height = 64;
+        let name;
 
         {
             // Load the image file corresponding to the material
