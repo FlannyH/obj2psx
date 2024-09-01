@@ -10,6 +10,7 @@ mod collision;
 mod helpers;
 mod kmeans;
 mod psx_structs;
+mod renderer;
 mod texture_page;
 mod visual;
 use clap::Parser;
