@@ -25,6 +25,7 @@ pub struct CollVertexPSX {
     pub terrain_id: u16,
 }
 
+#[derive(Debug)]
 pub struct NavGraphNode {
     pub pos_x: i16,
     pub pos_y: i16,

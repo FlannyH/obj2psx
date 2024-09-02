@@ -1,7 +1,7 @@
-use std::{ffi::c_void, mem::size_of};
+use std::{f32::consts::PI, ffi::c_void, mem::size_of};
 
-use gl::types::GLenum;
-use glfw::{Glfw, PWindow};
+use gl::types::{GLenum, GLfloat, GLvoid};
+use glfw::{Context, Glfw, PWindow};
 use memoffset::offset_of;
 
 use crate::psx_structs::CollVertexPSX;
@@ -56,8 +56,11 @@ impl Renderer {
                 layout (location = 0) uniform mat4 u_matrix;
                 layout (location = 1) uniform vec3 u_position;
 
+                out vec4 o_position;
+
                 void main() {
-                    gl_Position = u_matrix * vec4(i_position, 1);
+                    o_position = u_matrix * vec4(i_position, 1);
+                    gl_Position = o_position;
                 }
             ",
                 ),
@@ -69,9 +72,12 @@ impl Renderer {
                     "
                 #version 460
 
-                in vec3 o_position;
+                in vec4 o_position;
+                out vec4 frag_color;
 
-                void main() {}
+                void main() {
+                    frag_color = vec4(o_position.z, o_position.w, o_position.z / o_position.w, 255.0) / 255.0;
+                }
             ",
                 ),
                 program,
@@ -154,5 +160,36 @@ impl Renderer {
             );
         }
         self.n_vertices = vertices.len() as _;
+    }
+
+    pub fn is_path_occupied(&mut self, from_position: glam::Vec3, to_target: glam::Vec3, ray_width: f32) -> bool {
+        let distance_to_target = from_position.distance(to_target);
+        let matrix_proj = glam::Mat4::orthographic_lh(-ray_width, ray_width, -ray_width, ray_width, 0.00001, distance_to_target * 2.0);
+        // let matrix_proj = glam::Mat4::perspective_lh(PI / 2.0, 1.0, 0.01, 65536.0); // debug view
+        let matrix_view = glam::Mat4::look_at_lh(-from_position, -to_target, glam::Vec3::new(0.0, 1.0, 0.0)); // todo: check if this is correct
+        let matrix_combined = matrix_proj * matrix_view;
+        let mut buffer = vec![0.0f32; (RESOLUTION * RESOLUTION) as usize];
+        
+        unsafe {
+            // Render scene
+            gl::UseProgram(self.program);
+            gl::ClearDepth(1.0);
+            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+            gl::Clear(gl::DEPTH_BUFFER_BIT | gl::COLOR_BUFFER_BIT);
+            gl::UniformMatrix4fv(0, 1, gl::FALSE, matrix_combined.as_ref().as_ptr() as *const GLfloat);
+            gl::Enable(gl::DEPTH_TEST);
+            gl::Enable(gl::CULL_FACE);
+            gl::DrawArrays(gl::TRIANGLES, 0, self.n_vertices as i32);
+
+            // Get depth buffer to cpu
+            gl::ReadPixels(0, 0, RESOLUTION as i32, RESOLUTION as i32, gl::DEPTH_COMPONENT, gl::FLOAT, buffer.as_mut_ptr() as *mut GLvoid);
+        }
+
+        // find minimum depth in framebuffer
+        let min_depth = buffer.into_iter().reduce(f32::min).unwrap_or(1.0);
+
+        // The orthographic projection matrix takes the depth from [0, distance_to_target * 2.0] to [0, 1], so we just gotta check if the value is bigger than 0.5
+        // So if the minimum depth is bigger than 0.5, the path from position to target is not obstructed
+        return min_depth <= 0.5
     }
 }

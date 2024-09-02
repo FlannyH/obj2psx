@@ -3,7 +3,7 @@ use std::path::Path;
 use glam::I64Vec3;
 use tobj::LoadOptions;
 
-use crate::psx_structs::{CollModelPSX, CollVertexPSX, NavGraphNode};
+use crate::{psx_structs::{CollModelPSX, CollVertexPSX, NavGraphNode}, renderer::Renderer};
 
 pub fn obj2col(input_obj: String, output_col: String) {
     let (models, _materials) = tobj::load_obj(
@@ -56,7 +56,7 @@ pub fn obj2col(input_obj: String, output_col: String) {
         }
     }
 
-    let bvh = CollBvh::construct(triangles);
+    let bvh = CollBvh::construct(&triangles);
 
     let mut nav_graph_nodes = Vec::<NavGraphNode>::new();
     for (center, primitive) in bvh.centers.iter().zip(&bvh.primitives) {
@@ -68,15 +68,20 @@ pub fn obj2col(input_obj: String, output_col: String) {
         let center_y16 = (center.y / 4096) as i16;
         let center_z16 = (center.z / 4096) as i16;
 
-        nav_graph_nodes.push(NavGraphNode {
+        let value = NavGraphNode {
             pos_x: center_x16,
             pos_y: center_y16,
             pos_z: center_z16,
             neighbors: [0, 0, 0, 0], // We fill this in below
-        });
+        };
+        nav_graph_nodes.push(value);
     }
 
+    let mut renderer = Renderer::new();
+    renderer.upload_mesh_to_gpu(&triangles);
+
     // Naive approach to finding neighbors (closest cells)
+    let mut max = 0.0f32;
     for node1_index in 0..nav_graph_nodes.len() {
         // Add to circular buffer any time the value is lower than the last
         let mut closest_distances = [f32::INFINITY, f32::INFINITY, f32::INFINITY, f32::INFINITY];
@@ -86,21 +91,36 @@ pub fn obj2col(input_obj: String, output_col: String) {
         for node2_index in 0..nav_graph_nodes.len() {
             let node1 = &nav_graph_nodes[node1_index];
             let node2 = &nav_graph_nodes[node2_index];
-            let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32, node1.pos_z as f32);
-            let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32, node2.pos_z as f32);
+            let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32 + 32.0, node1.pos_z as f32);
+            let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32 + 32.0, node2.pos_z as f32);
             let distance = a.distance(b);
-            if distance < closest_distances[circular_buffer_index] {
-                closest_distances[circular_buffer_index] = distance;
-                closest_indices[circular_buffer_index] = node2_index;
-                circular_buffer_index += 1;
-                circular_buffer_index %= closest_distances.len();
+
+            if distance >= 1024.0 {
+                continue;
             }
+
+            if distance >= closest_distances[circular_buffer_index] {
+                continue;
+            }
+
+            if renderer.is_path_occupied(a * 8.0, b * 8.0, 32.0) {
+                continue;
+            }
+
+            closest_distances[circular_buffer_index] = distance;
+            closest_indices[circular_buffer_index] = node2_index;
+            circular_buffer_index += 1;
+            circular_buffer_index %= closest_distances.len();
         }
 
         for (i, closest_index) in closest_indices.iter().enumerate() {
             nav_graph_nodes[node1_index].neighbors[i] = *closest_index as u16;
+            if closest_distances[i] != f32::INFINITY {
+                max = max.max(closest_distances[i]);
+            }
         }
     }
+    dbg!(max);
 
     let collision_model_psx = CollModelPSX {
         triangles: bvh.primitives,
@@ -151,7 +171,7 @@ struct CollBvh {
 const COL_SCALE: i32 = 512;
 
 impl CollBvh {
-    pub fn construct(vertices: Vec<CollVertexPSX>) -> CollBvh {
+    pub fn construct(vertices: &Vec<CollVertexPSX>) -> CollBvh {
         let mut bvh = CollBvh {
             primitives: vec![],
             indices: vec![],
