@@ -105,6 +105,10 @@ pub fn obj2col(input_obj: String, output_col: String) {
         let mut circular_buffer_index = 0;
 
         for node2_index in 0..nav_graph_nodes.len() {
+            if node1_index == node2_index {
+                continue;
+            }
+
             let node1 = &nav_graph_nodes[node1_index];
             let node2 = &nav_graph_nodes[node2_index];
             let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32 + 32.0, node1.pos_z as f32);
