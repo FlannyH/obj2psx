@@ -111,11 +111,11 @@ pub fn obj2col(input_obj: String, output_col: String) {
 
             let node1 = &nav_graph_nodes[node1_index];
             let node2 = &nav_graph_nodes[node2_index];
-            let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32 + 32.0, node1.pos_z as f32);
-            let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32 + 32.0, node2.pos_z as f32);
+            let a = glam::vec3(node1.pos_x as f32, node1.pos_y as f32 + 8.0, node1.pos_z as f32);
+            let b = glam::vec3(node2.pos_x as f32, node2.pos_y as f32 + 8.0, node2.pos_z as f32);
             let distance = a.distance(b);
 
-            if distance >= 1024.0 {
+            if distance >= 128.0 {
                 continue;
             }
 
@@ -123,7 +123,7 @@ pub fn obj2col(input_obj: String, output_col: String) {
                 continue;
             }
 
-            if renderer.is_path_occupied(a * 8.0, b * 8.0, 32.0) {
+            if renderer.is_path_occupied(a * 8.0, b * 8.0, 24.0) {
                 continue;
             }
 
