@@ -140,7 +140,6 @@ pub fn obj2col(input_obj: String, output_col: String) {
             }
         }
     }
-    dbg!(max);
 
     let collision_model_psx = CollModelPSX {
         triangles: bvh.primitives,
