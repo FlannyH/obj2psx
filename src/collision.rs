@@ -78,7 +78,23 @@ pub fn obj2col(input_obj: String, output_col: String) {
     }
 
     let mut renderer = Renderer::new();
-    renderer.upload_mesh_to_gpu(&triangles);
+
+    let mut triangles_without_floor = vec![];
+    for triangle in triangles.chunks(3) {
+        let v0 = glam::vec3(triangle[0].pos_x as f32, triangle[0].pos_y as f32, triangle[0].pos_z as f32);
+        let v1 = glam::vec3(triangle[1].pos_x as f32, triangle[1].pos_y as f32, triangle[1].pos_z as f32);
+        let v2 = glam::vec3(triangle[2].pos_x as f32, triangle[2].pos_y as f32, triangle[2].pos_z as f32);
+        let edge_0_2 = v2 - v0;
+        let edge_0_1 = v1 - v0;
+        let normal = edge_0_2.cross(edge_0_1).normalize_or_zero();
+
+        if normal.y > -0.5 {
+            triangles_without_floor.push(triangle[0]);
+            triangles_without_floor.push(triangle[1]);
+            triangles_without_floor.push(triangle[2]);
+        }
+    }
+    renderer.upload_mesh_to_gpu(&triangles_without_floor);
 
     // Naive approach to finding neighbors (closest cells)
     let mut max = 0.0f32;
