@@ -1,7 +1,7 @@
 use std::{ffi::c_void, mem::size_of};
 
 use gl::types::{GLenum, GLfloat, GLvoid};
-use glfw::{Context, Glfw, PWindow};
+use glfw::{Glfw, PWindow};
 use memoffset::offset_of;
 
 use crate::psx_structs::CollVertexPSX;
