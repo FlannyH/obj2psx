@@ -5,6 +5,7 @@ use exoquant::{
     optimizer::{self, Optimizer},
     Color, SimpleColorSpace,
 };
+use log::{error, warn};
 
 use crate::psx_structs::{TextureCellPSX, TextureCollectionPSX};
 
@@ -17,7 +18,7 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
     };
 
     if image.height > 256 || image.width > 256 {
-        eprintln!("Image can not be bigger than 256x256")
+        error!("Image can not be bigger than 256x256")
     }
 
     // Quantize it to 16 colours
@@ -100,7 +101,7 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
             }
         }
     } else if n_transparent_colors > 1 {
-        println!("multiple transparent colors detected in texture {input:?}")
+        warn!("multiple transparent colors detected in texture {input:?}")
     }
 
     // Convert palette to 16 bit

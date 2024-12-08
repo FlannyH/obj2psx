@@ -2,6 +2,7 @@ use std::{ffi::c_void, mem::size_of};
 
 use gl::types::{GLenum, GLfloat, GLvoid};
 use glfw::{Glfw, PWindow};
+use log::error;
 use memoffset::offset_of;
 
 use crate::psx_structs::CollVertexPSX;
@@ -120,7 +121,7 @@ impl Renderer {
 
             // Did we get an error?
             if log_length > 0 {
-                println!(
+                error!(
                     "Shader compilation error!\n{}",
                     std::str::from_utf8(error_message.as_slice()).unwrap()
                 )

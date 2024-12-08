@@ -5,6 +5,7 @@ use exoquant::{
     optimizer::{self, Optimizer},
     Color, SimpleColorSpace,
 };
+use log::{debug, warn};
 use tobj::LoadOptions;
 
 use crate::{
@@ -68,7 +69,7 @@ pub fn obj2msh_txc(
             254 => "(occluder)".to_string(),
             x => psx_id_tex_mapping.get(x).unwrap().to_string(),
         };
-        println!("{obj_mat_id}: tex id {psx_tex_id}: {}", tex_name);
+        debug!("{obj_mat_id}: tex id {psx_tex_id}: {}", tex_name);
     }
 
     let mut model_psx = ModelPSX::new();
@@ -179,7 +180,7 @@ pub fn obj2msh_txc(
                         quads.push(curr_primitive[i]);
                     }
                 },
-                _ => println!("found polygon with more than 4 vertices! make sure the mesh only contains triangles and quads."),
+                _ => warn!("found polygon with more than 4 vertices! make sure the mesh only contains triangles and quads."),
             };
 
             curr_index += arity;
@@ -566,7 +567,7 @@ pub fn obj2msh_txc(
                 }
             }
         } else if n_transparent_colors > 1 {
-            println!("multiple transparent colors detected in texture {name}")
+            warn!("multiple transparent colors detected in texture {name}")
         }
 
         let color_b = Color {
@@ -707,7 +708,7 @@ fn split_equal_based_on_aabb(
                             && center_z <= curr_max_z
                         {
                             if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
-                                println!("out of bounds triangle? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
+                                warn!("out of bounds triangle? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
                             }
                             tris.extend_from_slice(triangle);
                         }
@@ -742,7 +743,7 @@ fn split_equal_based_on_aabb(
                             && center_z <= curr_max_z
                         {
                             if curr_min_x == i16::MIN || curr_max_x == i16::MAX {
-                                println!("out of bounds quad? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
+                                warn!("out of bounds quad? [{center_x}, {center_y}, {center_z}] not in [{min_x}, {min_y}, {min_z}] -> [{}, {}, {}]", min_x + size_x, min_y + size_y, min_z + size_z)
                             }
                             quads.extend_from_slice(quad);
                         }

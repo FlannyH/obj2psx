@@ -42,6 +42,10 @@ struct Cli {
     /// Whether this mesh should be split into regions
     #[arg(short, long)]
     split: bool,
+
+    /// Whether we want to print debug messages or not
+    #[arg(short, long)]
+    verbose: bool
 }
 
 fn main() {
@@ -49,6 +53,13 @@ fn main() {
     unsafe {
         stbi_set_flip_vertically_on_load(0);
     }
+
+    if args.verbose {
+        env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
+    } else {
+        env_logger::Builder::new().filter_level(log::LevelFilter::Info).init();
+    }
+
 
     let input = args.input.clone();
     if input.ends_with(".obj") {

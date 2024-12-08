@@ -8,10 +8,12 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.3.4", features = ["derive"] }
 colors-transform = "0.2.11"
+env_logger = "0.11.5"
 exoquant = "0.2.0"
 gl = "0.14.0"
 glam = "0.24.2"
 glfw = "0.58.0"
+log = "0.4.22"
 memoffset = "0.9.1"
 rand = "0.8.5"
 stb_image = "0.2.5"

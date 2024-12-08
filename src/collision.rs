@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use glam::I64Vec3;
+use log::warn;
 use tobj::LoadOptions;
 
 use crate::{psx_structs::{CollModelPSX, CollVertexPSX, NavGraphNode}, renderer::Renderer};
@@ -49,7 +50,7 @@ pub fn obj2col(input_obj: String, output_col: String) {
                         triangles.push(curr_primitive[i]);
                     }
                 },
-                _ => println!("found polygon with more than 3 vertices! make sure the collision mesh only contains triangles."),
+                _ => warn!("found polygon with more than 3 vertices! make sure the collision mesh only contains triangles."),
             };
 
             curr_index += arity;
