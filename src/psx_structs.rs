@@ -303,6 +303,8 @@ impl ModelPSX {
         validate(file.write(&(offset_mesh_desc as u32).to_le_bytes()));
         validate(file.write(&(offset_vertex_data as u32).to_le_bytes()));
         validate(file.write(&(offset_mesh_names as u32).to_le_bytes()));
+        validate(file.write(&(0u32).to_le_bytes())); // offset_lightmap_uv, will be filled by another tool
+        validate(file.write(&(0u32).to_le_bytes())); // offset_lightmap_tex
         validate(file.write(raw_data.as_slice()));
 
         Ok(0)
