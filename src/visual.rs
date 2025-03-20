@@ -124,6 +124,12 @@ pub fn obj2msh_txc(
                         None => 255,
                         Some(a) => *(material_mapping.get(a).unwrap_or(&255)) as u8,
                     },
+                    normal_x: (model.mesh.normals[index * 3 + 0] * 127.0).clamp(-127.0, 127.0)
+                        as i8,
+                    normal_y: (model.mesh.normals[index * 3 + 1] * 127.0).clamp(-127.0, 127.0)
+                        as i8,
+                    normal_z: (model.mesh.normals[index * 3 + 2] * 127.0).clamp(-127.0, 127.0)
+                        as i8,
                 };
                 curr_primitive.push(vert);
             }

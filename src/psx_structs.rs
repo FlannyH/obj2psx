@@ -15,6 +15,9 @@ pub struct VertexPSX {
     pub tex_u: u8,
     pub tex_v: u8,
     pub texture_id: u8,
+    pub normal_x: i8,
+    pub normal_y: i8,
+    pub normal_z: i8,
 }
 
 #[derive(Clone, Copy)]
@@ -281,8 +284,22 @@ impl ModelPSX {
 
         // Vertex data
         let offset_vertex_data = raw_data.len();
-        for vertex in raw_vertex_data {
+        for vertex in &raw_vertex_data {
             raw_data.extend(&vertex.get_bytes());
+        }
+
+        // Align to word
+        while raw_data.len() % 4 != 0 {
+            raw_data.push(0);
+        }
+
+        // Normal data
+        let offset_vertex_normals = raw_data.len();
+        for vertex in raw_vertex_data {
+            raw_data.extend(vertex.normal_x.to_le_bytes());
+            raw_data.extend(vertex.normal_y.to_le_bytes());
+            raw_data.extend(vertex.normal_z.to_le_bytes());
+            raw_data.push(0u8);
         }
 
         // Align to word
@@ -303,8 +320,9 @@ impl ModelPSX {
         validate(file.write(&(offset_mesh_desc as u32).to_le_bytes()));
         validate(file.write(&(offset_vertex_data as u32).to_le_bytes()));
         validate(file.write(&(offset_mesh_names as u32).to_le_bytes()));
-        validate(file.write(&(0u32).to_le_bytes())); // offset_lightmap_uv, will be filled by another tool
-        validate(file.write(&(0u32).to_le_bytes())); // offset_lightmap_tex
+        validate(file.write(&(offset_vertex_normals as u32).to_le_bytes()));
+        validate(file.write(&(0xFFFFFFFFu32).to_le_bytes())); // offset_lightmap_uv, will be filled by another tool
+        validate(file.write(&(0xFFFFFFFFu32).to_le_bytes())); // offset_lightmap_tex
         validate(file.write(raw_data.as_slice()));
 
         Ok(0)
