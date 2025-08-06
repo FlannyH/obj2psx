@@ -21,7 +21,7 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
         error!("Image can not be bigger than 256x256")
     }
 
-    // Quantize it to 16 colours
+    // Quantize it to 256 colours
     let mut tex_data_exoquant = Vec::new();
     let mut has_transparent_pixels = false;
     for pixel in image.data.chunks(image.depth) {
@@ -135,6 +135,7 @@ pub fn txc_from_page(input: &Path) -> TextureCollectionPSX {
         palette: tex_palette,
         texture_width: (image.width % 256) as u8,
         texture_height: (image.height % 256) as u8,
+        texture_bpp: 8,
         avg_color: 0,
     });
     txc_psx

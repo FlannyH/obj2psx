@@ -31,19 +31,14 @@ struct BspTree<'a> {
 
 struct BspNodeParent {
     split_plane: Plane,
-    child_node_index: u32,
-    index_first_polygon: u32,
-    polygon_count: u32,
-}
-
-struct BspNodeLeaf {
+    _child_node_index: u32,
     index_first_polygon: u32,
     polygon_count: u32,
 }
 
 enum BspNode {
     Parent(BspNodeParent),
-    Leaf(BspNodeLeaf),
+    Leaf,
 }
 
 #[derive(Copy, Clone)]
@@ -124,7 +119,7 @@ pub fn split_bsp(mesh_map: HashMap<String, MeshGridEntry>, poly_limit: u32) -> V
             position: Vec3::ZERO,
             normal: Vec3::ZERO,
         },
-        child_node_index: 1,
+        _child_node_index: 1,
         index_first_polygon: 0,
         polygon_count: bsp_tree.polygons.len() as _,
     }));
@@ -158,7 +153,7 @@ fn subdivide(
 ) {
     let node = match &mut bsp.nodes[node_index as usize] {
         BspNode::Parent(n) => n,
-        BspNode::Leaf(_) => unreachable!(), // If it's a leaf, we don't add it to the queue, so this never happens
+        BspNode::Leaf => unreachable!(), // If it's a leaf, we don't add it to the queue, so this never happens
     };
 
     // Find the split plane that creates the most equal split in terms of polygon count on either side
@@ -188,10 +183,7 @@ fn subdivide(
         let end = start + node.polygon_count;
 
         // Make this a leaf node
-        bsp.nodes[node_index as usize] = BspNode::Leaf(BspNodeLeaf {
-            index_first_polygon: node.index_first_polygon,
-            polygon_count: node.polygon_count,
-        });
+        bsp.nodes[node_index as usize] = BspNode::Leaf;
 
         // Create new MeshGridEntry and put all the polygons in it
         let mut mesh = MeshGridEntry {
@@ -216,7 +208,7 @@ fn subdivide(
     stack.push((bsp.nodes.len() as u32, rec_depth + 1));
     bsp.nodes.push(BspNode::Parent(BspNodeParent {
         split_plane: find_split_plane(&bsp.polygons, &bsp.indices, start1, count1),
-        child_node_index: 0,
+        _child_node_index: 0,
         index_first_polygon: start1,
         polygon_count: count1,
     }));
@@ -225,7 +217,7 @@ fn subdivide(
     stack.push((bsp.nodes.len() as u32, rec_depth + 1));
     bsp.nodes.push(BspNode::Parent(BspNodeParent {
         split_plane: find_split_plane(&bsp.polygons, &bsp.indices, start2, count2),
-        child_node_index: 0,
+        _child_node_index: 0,
         index_first_polygon: start2,
         polygon_count: count2,
     }));

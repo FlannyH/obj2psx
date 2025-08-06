@@ -1,4 +1,4 @@
-#![allow(clippy::identity_op, clippy::too_many_arguments, dead_code)]
+#![allow(clippy::identity_op, clippy::too_many_arguments)]
 
 use std::path::Path;
 

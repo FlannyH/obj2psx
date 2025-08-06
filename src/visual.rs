@@ -458,6 +458,10 @@ pub fn obj2msh_txc(
             palette: Vec::new(),
             texture_width: 64,
             texture_height: 64,
+            texture_bpp: match using_texture_page {
+                false => 4,
+                true => 8,
+            },
             avg_color: 0,
         };
         // Calculate average color

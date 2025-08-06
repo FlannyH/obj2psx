@@ -160,7 +160,7 @@ pub struct MeshDesc {
     pub y_max: i16,
     pub z_min: i16,
     pub z_max: i16,
-    pub pad: i16,
+    pub _pad: i16,
 }
 
 pub struct TextureCollectionPSX {
@@ -174,16 +174,7 @@ pub struct TextureCellPSX {
     pub texture_width: u8,
     pub texture_height: u8,
     pub avg_color: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct TextureCellBinary {
-    pub sector_offset_texture: u8,
-    pub palette_index: u8,
-    pub texture_width: u8,
-    pub texture_height: u8,
-    pub avg_color: u32,
+    pub texture_bpp: i32,
 }
 
 impl VertexPSX {
@@ -251,7 +242,7 @@ impl ModelPSX {
                 y_max,
                 z_min,
                 z_max,
-                pad: 0,
+                _pad: 0,
             });
             for vertex in &mesh.verts {
                 raw_vertex_data.push(*vertex);
@@ -350,10 +341,12 @@ impl TextureCollectionPSX {
         // Create binary data buffers for each part
         let mut bin_texture_cell_descs: Vec<u8> = Vec::new();
         let mut bin_palettes: Vec<u8> = Vec::new();
+        let mut bin_palette_offsets: Vec<u8> = Vec::new();
         let mut bin_texture_data: Vec<u8> = Vec::new();
 
         // Populate these buffers
         for i in 0..self.texture_cells.len() {
+            bin_palette_offsets.extend_from_slice(&(bin_palettes.len() as u32).to_le_bytes());
             let cell = &self.texture_cells[i];
             // Palettes
             {
@@ -391,6 +384,10 @@ impl TextureCollectionPSX {
                 // Write texture dimensions
                 bin_texture_cell_descs.push(cell.texture_width);
                 bin_texture_cell_descs.push(cell.texture_height);
+                bin_texture_cell_descs.push(cell.texture_bpp as u8);
+                bin_texture_cell_descs.push((cell.palette.len() / (1 << cell.texture_bpp as usize)) as u8);
+                bin_texture_cell_descs.push(0u8);
+                bin_texture_cell_descs.push(0u8);
 
                 // Write texture dimensions
                 bin_texture_cell_descs.extend_from_slice(&cell.avg_color.to_le_bytes());
@@ -403,6 +400,10 @@ impl TextureCollectionPSX {
         // Write offset to texture cell descs
         validate(file.write(&(cursor).to_le_bytes()));
         cursor += bin_texture_cell_descs.len() as u32;
+
+        // Write offset to palettes offsets
+        validate(file.write(&(cursor).to_le_bytes()));
+        cursor += bin_palette_offsets.len() as u32;
 
         // Write offset to palettes
         validate(file.write(&(cursor).to_le_bytes()));
@@ -422,6 +423,7 @@ impl TextureCollectionPSX {
 
         // Write the raw buffers now, in the right order
         validate(file.write(bin_texture_cell_descs.as_slice()));
+        validate(file.write(bin_palette_offsets.as_slice()));
         validate(file.write(bin_palettes.as_slice()));
 
         // Pad with zeroes

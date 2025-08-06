@@ -185,7 +185,6 @@ struct CollBvh {
 
     // Intermediates, won't get stored in the output file
     centers: Vec<glam::IVec3>,
-    node_pointer: usize,
 }
 
 const COL_SCALE: i32 = 512;
@@ -197,7 +196,6 @@ impl CollBvh {
             indices: vec![],
             nodes: vec![],
             centers: vec![],
-            node_pointer: 0,
         };
 
         // Get primitives and their center points
@@ -426,42 +424,5 @@ impl CollBvh {
         );
 
         self.nodes[node_index].primitive_count = 0;
-    }
-
-    fn partition(
-        primitives: &[CollTrianglePSX],
-        indices: &mut [u16],
-        axis: Axis,
-        pivot: i32,
-        start: u16,
-        count: u16,
-        split_index: &mut u16,
-    ) {
-        let mut i = start;
-        for j in start..(start + count) {
-            // Get min and max of the axis we want
-            let prim = &primitives[indices[j as usize] as usize];
-            let bounds = Aabb {
-                min: prim.v0.min(prim.v1.min(prim.v2)),
-                max: prim.v0.max(prim.v1.max(prim.v2)),
-            };
-
-            // Get center
-            let center =
-                (bounds.min.as_i64vec3() + bounds.max.as_i64vec3()) / I64Vec3::new(2, 2, 2);
-            let center_point = match axis {
-                Axis::X => center.as_ivec3().x,
-                Axis::Y => center.as_ivec3().y,
-                Axis::Z => center.as_ivec3().z,
-            };
-
-            // Swap primitives that are on the wrong sides of the pivot
-            if (center_point > pivot) && (j != i) {
-                indices.swap(i as usize, j as usize);
-                i += 1;
-            }
-        }
-
-        *split_index = i;
     }
 }
