@@ -25,7 +25,7 @@ pub struct CollVertexPSX {
     pub pos_x: i16,
     pub pos_y: i16,
     pub pos_z: i16,
-    pub terrain_id: u16,
+    pub _terrain_id: u16,
 }
 
 #[derive(Debug)]
@@ -194,12 +194,13 @@ impl VertexPSX {
 }
 
 impl CollVertexPSX {
-    pub fn get_bytes(&self) -> Vec<u8> {
+    // todo: unused?
+    pub fn _get_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(self.pos_x.to_le_bytes());
         bytes.extend(self.pos_y.to_le_bytes());
         bytes.extend(self.pos_z.to_le_bytes());
-        bytes.extend(self.terrain_id.to_le_bytes());
+        bytes.extend(self._terrain_id.to_le_bytes());
         bytes
     }
 }

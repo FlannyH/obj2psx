@@ -14,8 +14,8 @@ pub struct Renderer {
     vao: u32,
     vbo: u32,
     n_vertices: i32,
-    window: PWindow,
-    glfw: Glfw,
+    _window: PWindow,
+    _glfw: Glfw,
 }
 
 impl Renderer {
@@ -92,8 +92,8 @@ impl Renderer {
             vao: 0,
             vbo: 0,
             n_vertices: 0,
-            window,
-            glfw,
+            _window: window,
+            _glfw: glfw,
         }
     }
 

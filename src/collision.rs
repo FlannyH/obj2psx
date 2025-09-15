@@ -40,7 +40,7 @@ pub fn obj2col(input_obj: String, output_col: String) {
                         as i16,
                     pos_z: (model.mesh.positions[index * 3 + 2] * 1024.0).clamp(-32768.0, 32767.0)
                         as i16,
-                    terrain_id: 0,
+                    _terrain_id: 0,
                 };
                 curr_primitive.push(vert);
             }
