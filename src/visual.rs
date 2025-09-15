@@ -456,8 +456,9 @@ pub fn obj2msh_txc(
         let mut tex_cell = TextureCellPSX {
             texture_data: Vec::new(),
             palette: Vec::new(),
-            texture_width: 64,
-            texture_height: 64,
+            texture_width: width as u8,
+            texture_height: height as u8,
+            // todo: unhardcore this - maybe the image file name can end in _4bpp, _8bpp or _15bpp to override it?
             texture_bpp: match using_texture_page {
                 false => 4,
                 true => 8,
